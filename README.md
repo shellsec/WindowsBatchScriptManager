@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](version.py)
+[![Version](https://img.shields.io/badge/version-1.1.1-green.svg)](version.py)
 
 ## ☕ 请我喝可乐
 开源不易，欢迎赞助支持：
@@ -10,7 +10,7 @@
 
 [English](#english) | [中文](#中文)
 
-> 一个轻量级的脚本管理器（**v1.1.0**），支持 **Windows / macOS / Linux**，统一管理批处理、Python、Node.js、PowerShell 等多种脚本类型，提供执行历史、异常通知、定时任务等高级功能；支持**命令行（CLI）**与**HTTP API**，便于自动化与远程调用。
+> 一个轻量级的脚本管理器（**v1.1.1**），支持 **Windows / macOS / Linux**，统一管理批处理、Python、Node.js、PowerShell 等多种脚本类型，提供执行历史、异常通知、定时任务、系统托盘等高级功能；支持**命令行（CLI）**与**HTTP API**（默认鉴权），便于自动化与远程调用。
 
 **WindowsBatchScriptManager** 支持在 Windows / macOS / Linux 下运行；Windows 可打包为 exe，本机或另一台机器可通过 CLI 或 API 启停、添加脚本等。
 
@@ -86,10 +86,12 @@
 - **关键词搜索与定位**：筛选行可输入「关键词」，点「定位」跳转到第一个匹配项（ID/名称/分组/路径/工作目录），点「下一个」继续查找下一项；支持回车触发定位
 - **IP地址显示**：筛选行显示本地IP（点击复制）；第三行「停止软件外所有批处理」右侧显示外网IP，点击可复制；本地 IP 与外网 IP 均在主循环启动后异步加载，不阻塞启动；外网 IP 会先判断是否联网，未联网则直接显示「无法获取」；筛选行支持横向滚动，内容较多时可拖动查看
 - **首页**：菜单栏「首页」在浏览器打开项目 GitHub 页面（https://github.com/shellsec/WindowsBatchScriptManager）
-- **导出/导入配置**：工具栏「导出配置」备份到文件，「导入配置」支持合并或替换，便于迁移和备份
-- **定时任务**：支持每天、每小时、每分钟、每周、每月、每N小时、每季度、每年、单次执行、工作日的定时启动/重启/停止
-- **执行历史记录**：自动记录每个脚本的启动/停止时间、运行时长、退出码；查看历史统计（成功率、平均运行时长）；工具栏「执行历史」查看
-- **异常通知**：脚本异常退出时自动弹窗提醒；支持 Webhook 通知（GET/POST），可配置通知条件（退出码非0、快速退出等）；工具栏「通知配置」设置
+- **导出/导入配置**：工具栏「导出配置」备份到文件，「导入配置」支持合并或替换；保存配置时自动写 `.bak`，菜单「设置」→「从上次备份恢复配置」可一键回滚
+- **定时任务**：支持每天、每小时、每分钟、每周、每月、每N小时、每季度、每年、单次执行、工作日的定时启动/重启/停止；工具栏「定时总览」查看已启用任务与下次执行时间
+- **执行历史记录**：自动记录每个脚本的启动/停止时间、运行时长、退出码；支持按日期筛选与导出 CSV；工具栏「执行历史」查看统计（成功率、平均运行时长）
+- **启动失败诊断**：状态栏显示具体失败原因（路径不存在、未找到 Python 等）；右键「诊断启动问题 / 复制诊断信息」
+- **系统托盘（Windows）**：设置可勾选「关闭窗口时最小化到托盘」（ctypes，无 Pillow）；托盘右键：显示主窗口 / 全部停止 / 退出
+- **异常通知**：脚本异常退出时自动弹窗提醒；支持 Webhook 通知（GET/POST，失败自动重试）；可配置通知条件（退出码非0、快速退出等）；工具栏「通知配置」设置
 - **批量编辑**：选中多个脚本，工具栏「批量编辑」可批量修改分组、解释器、启动参数、定时任务、保活、日志输出等
 - **拖放添加**：将脚本文件拖入窗口即可添加为新任务；支持批量拖入
 - **HTTP 请求任务**：支持添加 `http://` 或 `https://` URL 作为 HTTP GET 请求任务，启动时自动发送请求并获取响应状态码；HTTP 请求类型自动禁用保活（curl 正常退出后无需重启）
@@ -97,7 +99,7 @@
 - **直接命令任务**：支持直接输入命令行（如 `ping 8.8.8.8`、`ipconfig /all`、`python -c "print('hello')"`），通过 `cmd.exe /c` 执行，支持管道、重定向等 Windows 命令行特性；支持保活、定时任务、日志输出；自动识别：输入含空格且第一个词无文件扩展名的命令时自动切换为命令类型
 - **添加/编辑弹窗**：统一表单填名称、路径、工作目录、分组、解释器（Python/Node.js/Shell）、保活、记录输出（Python/Node.js/PowerShell/命令）、定时任务；路径与工作目录可「浏览」选择；根据脚本类型自动显示/隐藏相应选项；类型下拉框可选择脚本/HTTP请求/进程管理/直接命令/系统关机/系统重启
 - **主面板添加(手动)按钮**：工具栏「添加(手动)」按钮可快速打开添加弹窗（手动输入 URL、进程名或命令），无需选择本地文件
-- **右键菜单**：支持打开文件、打开目录、访问端口、复制信息、分组启停、查看日志等快捷操作
+- **右键菜单**：支持打开文件、打开目录、访问端口、复制信息、分组启停、查看日志、启动诊断等快捷操作
 - **行排序**：Alt+拖拽行可调整顺序；Alt+↑/↓键盘快捷键上下移动行；右键菜单「上移/下移」
 - **模板系统**：保存脚本配置为模板，从模板快速添加新脚本，管理已有模板
 - **开机自启**：右键菜单可将管理器设为 Windows 开机自启动
@@ -116,8 +118,9 @@
    ```bash
    python main.py
    ```
-   开机自启且不想挡桌面：**设置 → 启动后最小化到任务栏**；或 `python main.py --minimized`（也可写入开机自启命令）。关闭窗口仍会退出程序（无托盘）。
-   **macOS / Linux**：在项目根目录执行 `python3 main.py`（不要进子目录里的独立副本，除非维护单独仓库）。
+   开机自启且不想挡桌面：**设置 → 启动后最小化到任务栏**；或 `python main.py --minimized`（也可写入开机自启命令）。
+   Windows 常驻：**设置 → 关闭窗口时最小化到托盘**（也可菜单「最小化到托盘」）；托盘右键可显示窗口 / 全部停止 / 退出。
+   **macOS / Linux**：在项目根目录执行 `python3 main.py`（不要进子目录里的独立副本，除非维护单独仓库）；添加脚本时默认弱化 `.bat/.cmd/.vbs/.exe` 等 Windows 专用类型。
 
 ### macOS / Linux 快速验证
 
@@ -153,7 +156,8 @@ python3 main.py --update 1 --args "--version" --env-vars "MY_TEST=1"
 ```bash
 pip install fastapi uvicorn
 python3 WindowsBatchScriptManager_api_server.py --host 127.0.0.1 --port 8765
-curl "http://127.0.0.1:8765/list"
+# 默认开启鉴权；请改 API_KEY 或传 --api-key
+curl -H "X-API-Key: change-me-in-production" "http://127.0.0.1:8765/list"
 ```
 
 ### 命令行（CLI）
@@ -202,11 +206,14 @@ python main.py --add --path "C:\path\to\script.py" --name "我的脚本" --scrip
    ```bash
    python WindowsBatchScriptManager_api_server.py --port 8765
    ```
-   - 允许本机以外访问：`--host 0.0.0.0`
+   - **默认开启鉴权**；仅本机调试可加 `--no-auth`（勿对公网开放）
+   - 允许本机以外访问：`--host 0.0.0.0`（务必改掉默认 API Key）
    - 自定义 API Key：`--api-key your-secret` 或环境变量 `API_KEY`
-3. 请求时请求头需带：`X-API-Key: <密钥>`（默认 `change-me-in-production`，生产环境务必修改）。使用 `--no-auth` 时可不带 X-API-Key 直接 GET/POST。
+3. 请求时请求头需带：`X-API-Key: <密钥>`（默认 `change-me-in-production`，生产环境务必修改）。
 
-可选 **GET /exec?cmd=...**（默认关闭）：在 API 脚本内去掉 `# ENABLE_GET_CMD_EXEC = True` 行首注释后启用；高危，仅内网且务必鉴权。
+可选 **GET /exec?cmd=...**（默认关闭）：在 API 脚本内去掉 `# ENABLE_GET_CMD_EXEC = True` 行首注释后启用；高危，禁止与 `--no-auth` 或默认 Key + `0.0.0.0` 组合使用。
+
+可选 **Web Dashboard**（`web_dashboard.py`）：默认绑定 `127.0.0.1`，需 `X-API-Key`（或 `/?key=`）；与 GUI exe 分离，不打进 exe。
 
 接口示例：
 
@@ -257,25 +264,26 @@ CLI 与 API 在 **Windows / macOS / Linux** 下均可使用；API 在无 exe 环
 10. **分组筛选**：表格上方「筛选分组」下拉框选择分组，只显示该分组的项；「清除筛选」恢复显示全部
 11. **关键词搜索与定位**：在「关键词」输入框输入文字，点「定位」或按回车，列表中第一个匹配项（ID/名称/分组/路径/工作目录）会被选中并滚动到可见；点「下一个」可跳到下一个匹配项
 12. **IP地址显示**：筛选行右侧显示本地IP，点击可复制；第三行「停止软件外所有批处理」右侧显示外网IP，点击可复制；外网IP启动时自动获取；当筛选行内容较多时，右侧会出现横向滚动条，可拖动查看所有内容
-13. **导出/导入配置**：工具栏「导出配置」保存当前配置到 JSON 文件；「导入配置」可选择合并（保留现有+添加新）或替换（清空后全部导入）
-14. **执行历史**：工具栏「执行历史」查看脚本的执行历史记录，包括启动/停止时间、运行时长、退出码、统计信息（成功率、平均运行时长）
-15. **异常通知**：工具栏「通知配置」设置异常通知规则（退出码非0、快速退出阈值），可配置 Webhook URL（GET/POST）发送通知到外部系统
-16. **批量编辑**：选中多个脚本，工具栏「批量编辑」可批量修改分组、解释器、定时任务启用/禁用、保活启用/禁用、日志输出启用/禁用
-17. **暂停刷新 / 恢复刷新**：第二行「暂停刷新」停止定时刷新（保活、运行中接管一并暂停）；「刷新状态」仍可手动刷；再点「恢复刷新」恢复；菜单「设置」→「刷新间隔」可改为 2 秒 / 4 秒 / 8 秒
-18. **扫描运行中**：点「扫描运行中」→ 弹窗列出**系统当前正在运行**的脚本进程（需 psutil）；可「加入管理器」（选中项）、「全部加入」（本页全部）、或「结束选中」
-19. **定时任务**：编辑时启用定时任务，可选择每天、每小时、每分钟、每周、每月，支持启动/重启/停止三种行为
-20. **右键菜单**：右键点击表格项，可快速打开文件、打开目录、访问端口、复制信息、分组启停、查看日志等
-21. **行排序**：Alt+拖拽行调整顺序；Alt+↑/↓键盘上下移动行；右键菜单「上移/下移」
-22. **模板系统**：右键菜单「保存为模板」保存当前配置，「从模板添加」快速创建新脚本，「管理模板」查看删除模板
-23. **开机自启**：右键菜单可将管理器设为 Windows 开机自启动（创建启动文件夹快捷方式）
-24. **查看日志**：右键菜单「查看日志」查看脚本日志文件，自动显示最后100KB内容
-25. **首页**：菜单栏「首页」在浏览器打开项目 GitHub 页面
+13. **导出/导入配置**：工具栏「导出配置」保存当前配置到 JSON 文件；「导入配置」可选择合并（保留现有+添加新）或替换（清空后全部导入）；菜单「设置」→「从上次备份恢复配置」可从 `.bak` 回滚
+14. **执行历史**：工具栏「执行历史」查看记录与统计；可按日期筛选并导出 CSV
+15. **定时总览**：工具栏「定时总览」查看已启用定时任务及下次执行时间
+16. **异常通知**：工具栏「通知配置」设置异常通知规则（退出码非0、快速退出阈值），可配置 Webhook URL（GET/POST，失败重试）
+17. **批量编辑**：选中多个脚本，工具栏「批量编辑」可批量修改分组、解释器、定时任务启用/禁用、保活启用/禁用、日志输出启用/禁用
+18. **暂停刷新 / 恢复刷新**：第二行「暂停刷新」停止定时刷新（保活、运行中接管一并暂停）；「刷新状态」仍可手动刷；再点「恢复刷新」恢复；菜单「设置」→「刷新间隔」可改为 2 秒 / 4 秒 / 8 秒
+19. **扫描运行中**：点「扫描运行中」→ 弹窗列出**系统当前正在运行**的脚本进程（需 psutil）；可「加入管理器」（选中项）、「全部加入」（本页全部）、或「结束选中」
+20. **定时任务**：编辑时启用定时任务，可选择每天、每小时、每分钟、每周、每月等，支持启动/重启/停止三种行为
+21. **右键菜单**：右键点击表格项，可快速打开文件、打开目录、访问端口、复制信息、分组启停、查看日志、诊断启动问题等
+22. **行排序**：Alt+拖拽行调整顺序；Alt+↑/↓键盘上下移动行；右键菜单「上移/下移」
+23. **模板系统**：右键菜单「保存为模板」保存当前配置，「从模板添加」快速创建新脚本，「管理模板」查看删除模板
+24. **开机自启 / 托盘**：右键可将管理器设为开机自启动；Windows 下可勾选关闭到托盘
+25. **查看日志**：右键菜单「查看日志」查看脚本日志文件，自动显示最后100KB内容
+26. **首页**：菜单栏「首页」在浏览器打开项目 GitHub 页面
 
 ### 文件说明
 
 | 文件/目录            | 说明                                   |
 |----------------------|----------------------------------------|
-| `version.py`         | 应用版本号（当前 **1.1.0**，GUI 与 API 共用） |
+| `version.py`         | 应用版本号（当前 **1.1.1**，GUI 与 API 共用） |
 | `main.py`            | 主程序（GUI + CLI）                    |
 | `WindowsBatchScriptManager_api_server.py` | HTTP API 服务（GUI 可独立启停；勿用 restart-all 管 API 任务） |
 | `api_config.json`    | API 自动启动等配置（可选，GUI 勾选后生成） |
@@ -333,9 +341,9 @@ pyinstaller build_exe.spec
   - 本地 IP 与外网 IP 均在主循环启动后异步加载，不阻塞启动；外网 IP 会先判断是否联网，未联网则直接显示「无法获取」
   - 外网IP获取失败时显示「无法获取IP地址」
   - 筛选行内容较多时，右侧自动显示横向滚动条，可拖动查看所有内容
-- **配置保存**：保存时先写临时文件再替换原文件，避免写入中断损坏配置；保存失败时状态栏会提示
-- **启动后最小化**：菜单「设置」可勾选「启动后最小化到任务栏」（写入 `app_config.json`）；命令行 `python main.py --minimized` 仅当次生效。已启用「开机启动」时，勾选最小化会自动更新自启命令。无系统托盘，最小化后请从任务栏恢复；纯后台可改用 CLI/API
-- **停止与状态**：对已停止的项点「停止」时，状态栏会提示「所选项已处于停止状态」；路径不存在的项在状态列显示「路径无效」
+- **配置保存**：保存时先写临时文件再替换原文件，并自动备份上一版为 `.bak`；保存失败时状态栏会提示；可用「从上次备份恢复配置」回滚
+- **启动后最小化 / 托盘**：菜单「设置」可勾选「启动后最小化到任务栏」或「关闭窗口时最小化到托盘」（写入 `app_config.json`）；命令行 `python main.py --minimized` 仅当次生效。托盘为 ctypes 实现（不引入 Pillow）；纯后台可改用 CLI/API
+- **停止与状态**：对已停止的项点「停止」时，状态栏会提示「所选项已处于停止状态」；路径不存在的项在状态列显示「路径无效」；启动失败时状态栏给出具体原因，右键可查看完整诊断
 - **导出/导入配置**：导出会保存所有配置（不含运行时状态如 PID）；导入时「合并」会跳过已存在的路径，「替换」会清空现有后全部导入
 - **定时任务**：
   - 支持每天、每小时、每分钟、每周、每月、每N小时、每季度、每年、单次执行、工作日共十种类型
@@ -343,15 +351,16 @@ pyinstaller build_exe.spec
   - 定时检查频率为每 10 秒一次
   - 对于停止行为，时间到达后持续有效直到执行完成
   - 单次执行类型执行后自动禁用
+  - 工具栏「定时总览」可查看下次执行时间
   - CLI 和 API 均支持完整的定时任务参数配置
 - **执行历史记录**：
   - 自动记录每个脚本的每次执行（启动时间、停止时间、运行时长、退出码、状态）
   - 每个脚本最多保留最近 100 条历史记录
   - 历史记录保存在 `execution_history.json`
-  - 支持查看统计信息（总计次数、成功次数、失败次数、平均运行时长）
+  - 支持查看统计信息、按日期筛选、导出 CSV
 - **异常通知**：
   - 可配置通知条件：退出码非0、快速退出（默认<5秒，可配置阈值）
-  - 支持 Webhook 通知：GET 或 POST 请求，数据包含脚本名称、异常原因、退出码、运行时长、时间戳
+  - 支持 Webhook 通知：GET 或 POST 请求，失败时最多重试 2 次并退避
   - 通知配置保存在 `notification_config.json`
 - **批量编辑**：
   - 支持批量修改分组、解释器
@@ -367,7 +376,7 @@ pyinstaller build_exe.spec
 <a name="english"></a>
 ## English Version
 
-**WindowsBatchScriptManager** is a lightweight script manager (**v1.1.0**) that runs on **Windows / macOS / Linux**. It centrally manages batch, Python, Node.js, PowerShell and other script types, with execution history, exception notifications, and scheduled tasks. It supports **CLI** and **HTTP API** for automation and remote control.
+**WindowsBatchScriptManager** is a lightweight script manager (**v1.1.1**) that runs on **Windows / macOS / Linux**. It centrally manages batch, Python, Node.js, PowerShell and other script types, with execution history, exception notifications, scheduled tasks, and (on Windows) a system tray. It supports **CLI** and **HTTP API** (auth enabled by default) for automation and remote control.
 
 ### Use Cases
 
@@ -434,10 +443,12 @@ Subfolders `linuxBatchScriptManager/` / `macBatchScriptManager/` ship **platform
 - **Keyword Search & Locate**: Enter a keyword in the filter row, click "Locate" (or press Enter) to jump to the first matching row (ID/name/group/path/work dir); "Next" finds the next match
 - **IP Address Display**: Filter row shows local IP (click to copy); third row shows public IP to the right of "Stop All Batch Scripts Outside Manager" (click to copy); local and public IP are both loaded asynchronously after main loop starts (non-blocking startup); public IP checks network reachability first and shows "Unable to get IP" when offline; filter row supports horizontal scrolling when content is too wide
 - **Home**: Menu "Home" opens the project GitHub page (https://github.com/shellsec/WindowsBatchScriptManager) in browser
-- **Export/Import Config**: Toolbar "Export Config" backs up to file, "Import Config" supports merge or replace, convenient for migration and backup
-- **Scheduled Tasks**: Supports daily, hourly, minutely, weekly, monthly, every N hours, quarterly, yearly, once, weekday scheduled start/restart/stop
-- **Execution History**: Automatically records start/stop times, runtime, exit codes for each script; view statistics (success rate, average runtime); access via "Execution History" button
-- **Exception Notifications**: Automatic popup alerts on script exceptions; supports Webhook notifications (GET/POST), configurable conditions (non-zero exit code, quick exit); configure via "Notification Config" button
+- **Export/Import Config**: Toolbar "Export Config" / "Import Config" (merge or replace); saves auto-write `.bak`; Settings → "Restore config from last backup"
+- **Scheduled Tasks**: Daily/hourly/minutely/weekly/monthly/every-N-hours/quarterly/yearly/once/weekday; toolbar **Schedules** overview shows next run times
+- **Execution History**: Records start/stop, runtime, exit code; date filter + CSV export; statistics via "Execution History"
+- **Start Failure Diagnosis**: Status bar shows concrete reasons; right-click "Diagnose start" / "Copy diagnosis"
+- **System Tray (Windows)**: Optional "Minimize to tray on close" (ctypes, no Pillow); tray right-click: Show / Stop All / Quit
+- **Exception Notifications**: Popup on abnormal exit; Webhook GET/POST with automatic retries; configure via "Notification Config"
 - **Batch Edit**: Select multiple scripts, use "Batch Edit" button to modify group, interpreter, launch arguments, scheduled tasks, keep-alive, log output in bulk
 - **HTTP Request Tasks**: Support adding `http://` or `https://` URL as HTTP GET request tasks; automatically sends request on start and shows response status code; auto-disable keep-alive for HTTP request type (curl exits normally, no need to restart)
 - **Drag & Drop**: Drag script files into the window to add as new tasks; supports batch dropping; always adds new tasks without replacing existing ones
@@ -445,7 +456,7 @@ Subfolders `linuxBatchScriptManager/` / `macBatchScriptManager/` ship **platform
 - **Direct Command Tasks**: Support entering command line directly (e.g., `ping 8.8.8.8`, `ipconfig /all`, `python -c "print('hello')"`), executed via `cmd.exe /c`, supports pipes, redirection and other Windows command-line features; supports keep-alive, scheduled tasks, and log output; auto-detection: commands with spaces and no file extension on the first word are automatically identified as command type
 - **Add/Edit Dialog**: Unified form for name, path, working directory, group, interpreter (Python/Node.js/Shell), keep-alive, log output (Python/Node.js/PowerShell/Command), scheduled tasks; path and working directory can be browsed; automatically shows/hides relevant options based on script type; type dropdown supports Script / HTTP Request / Process Management / Direct Command
 - **Main Panel Add (Manual) Button**: Toolbar "Add (Manual)" button opens add dialog for manual URL, process name, or command input without file picker
-- **Right-Click Menu**: Supports quick operations like open file, open directory, visit port, copy info, group start/stop, view log, etc.
+- **Right-Click Menu**: Open file/dir, visit port, copy info, group start/stop, view log, diagnose start, etc.
 - **Row Reordering**: Alt+drag to reorder rows; Alt+↑/↓ keyboard shortcuts to move rows up/down; right-click "Move Up/Move Down"
 - **Template System**: Save script config as template, add new scripts from template, manage existing templates
 - **Auto Start on Boot**: Right-click menu to set the manager as Windows startup item
@@ -464,8 +475,9 @@ Subfolders `linuxBatchScriptManager/` / `macBatchScriptManager/` ship **platform
    ```bash
    python main.py
    ```
-   To stay out of the way on boot: **Settings → Minimize to taskbar on start**, or `python main.py --minimized` (also appended to login auto-start when enabled). Closing the window still exits the app (no system tray).
-   **macOS / Linux**: `python3 main.py` at the repository root.
+   To stay out of the way on boot: **Settings → Minimize to taskbar on start**, or `python main.py --minimized`.
+   Windows stay-resident: **Settings → Minimize to tray on close** (tray right-click: Show / Stop All / Quit).
+   **macOS / Linux**: `python3 main.py` at the repository root; add-dialog soft-filters Windows-only extensions (`.bat/.cmd/.vbs/.exe`).
 
 ### macOS / Linux quick check
 
@@ -529,11 +541,14 @@ python main.py --add --path "/path/to/script.py" --name "My Script" --script-typ
    ```bash
    python WindowsBatchScriptManager_api_server.py --port 8765
    ```
-   - Allow access from other machines: `--host 0.0.0.0`
+   - **Auth is enabled by default**; use `--no-auth` only for local debugging (never on public networks)
+   - Allow access from other machines: `--host 0.0.0.0` (must change the default API key)
    - Custom API key: `--api-key your-secret` or env `API_KEY`
-3. Requests must include header: `X-API-Key: <key>` (default `change-me-in-production`; change in production). With `--no-auth`, no X-API-Key is required for GET/POST.
+3. Requests must include header: `X-API-Key: <key>` (default `change-me-in-production`; change in production).
 
-Optional **GET `/exec?cmd=...`** (disabled by default): uncomment `# ENABLE_GET_CMD_EXEC = True` in the API script (remove leading `#`), restart the server. High risk — use strong API key, never expose with `--no-auth` on untrusted networks.
+Optional **GET `/exec?cmd=...`** (disabled by default): uncomment `# ENABLE_GET_CMD_EXEC = True` in the API script. High risk — blocked with `--no-auth` or default key on `0.0.0.0`.
+
+Optional **Web Dashboard** (`web_dashboard.py`): binds `127.0.0.1` by default; requires `X-API-Key` (or `/?key=`); not bundled into the GUI exe.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -552,7 +567,7 @@ Optional **GET `/exec?cmd=...`** (disabled by default): uncomment `# ENABLE_GET_
 | POST | /import | Import body `{"items": [...]}` |
 | GET | /exec?cmd=... | Run cmd via `cmd.exe /c` (Windows; **off by default**) |
 
-Root `/` returns `{"status":"ok","version":"1.1.0"}` when HTML docs are disabled (`--docs` enables `/` docs page).
+Root `/` returns `{"status":"ok","version":"1.1.1"}` when HTML docs are disabled (`--docs` enables `/` docs page).
 
 Example (from another machine):
 ```bash
@@ -576,25 +591,26 @@ CLI and API work on **Windows / macOS / Linux**; without an exe, the API uses `p
 10. **Group Filter**: "Filter by Group" dropdown above table selects group, only shows items in that group; "Clear Filter" restores showing all
 11. **Keyword Search & Locate**: Enter text in "Keyword" box, click "Locate" or press Enter to select and scroll to the first matching row (ID/name/group/path/work dir); "Next" jumps to the next match
 12. **IP Address Display**: Filter row shows local IP (click to copy); third row shows public IP to the right of "Stop All Batch Scripts Outside Manager" (click to copy); public IP is automatically fetched on startup; when filter row content is too wide, a horizontal scrollbar appears for scrolling
-13. **Export/Import Config**: Toolbar "Export Config" saves current config to JSON file; "Import Config" can choose merge (keep existing + add new) or replace (clear all then import)
-14. **Execution History**: Toolbar "Execution History" to view script execution history, including start/stop times, runtime, exit codes, statistics (success rate, average runtime)
-15. **Exception Notifications**: Toolbar "Notification Config" to set exception notification rules (non-zero exit code, quick exit threshold), can configure Webhook URL (GET/POST) to send notifications to external systems
-16. **Batch Edit**: Select multiple scripts, use "Batch Edit" button to modify group, interpreter, enable/disable scheduled tasks, keep-alive, log output in bulk
-17. **Pause Refresh / Resume Refresh**: Second row "Pause Refresh" stops auto-refresh (keep-alive, running process adoption also paused); "Refresh Status" can still manually refresh; click "Resume Refresh" to resume; menu "Settings" → "Refresh interval" can set 2 / 4 / 8 sec
-18. **Scan Running**: Click "Scan Running" → Popup lists **currently running** script processes in system (requires psutil); can "Add to Manager" (selected items), "Add All" (all on page), or "End Selected"
-19. **Scheduled Tasks**: Enable scheduled tasks when editing, can choose daily, hourly, minutely, weekly, monthly, supports start/restart/stop three behaviors
-20. **Right-Click Menu**: Right-click table items for quick operations like open file, open directory, visit port, copy info, group start/stop, view log, etc.
-21. **Row Reordering**: Alt+drag to reorder rows; Alt+↑/↓ keyboard shortcuts; right-click "Move Up/Move Down"
-22. **Template System**: Right-click "Save as Template" to save config, "Add from Template" to quickly create, "Manage Templates" to view/delete
-23. **Auto Start on Boot**: Right-click menu to add manager to Windows startup folder
-24. **View Log**: Right-click "View Log" to view script log, auto-displays last 100KB
-25. **Home**: Menu "Home" opens the project GitHub page in browser
+13. **Export/Import Config**: Export/import JSON; Settings → restore from `.bak`
+14. **Execution History**: View stats; date filter + CSV export
+15. **Schedule Overview**: Toolbar "Schedules" lists enabled jobs and next run times
+16. **Exception Notifications**: Notification rules + Webhook (with retries)
+17. **Batch Edit**: Bulk change group, interpreter, schedule/keep-alive/log flags
+18. **Pause Refresh / Resume Refresh**: Pause auto-refresh; Settings → refresh interval 2/4/8s
+19. **Scan Running**: List running script processes (psutil); add or end selected
+20. **Scheduled Tasks**: Enable in edit dialog (daily/hourly/… start/restart/stop)
+21. **Right-Click Menu**: Open file/dir, ports, copy, group ops, logs, diagnose start
+22. **Row Reordering**: Alt+drag / Alt+↑↓ / Move Up-Down
+23. **Template System**: Save / apply / manage templates
+24. **Auto Start / Tray**: Boot startup; Windows tray minimize on close
+25. **View Log**: Last 100KB of script log
+26. **Home**: Opens GitHub project page
 
 ### Files
 
 | File/Directory      | Description                              |
 |---------------------|------------------------------------------|
-| `version.py`        | App version (**1.1.0**, shared by GUI & API) |
+| `version.py`        | App version (**1.1.1**, shared by GUI & API) |
 | `main.py`           | Main program (GUI + CLI)                 |
 | `WindowsBatchScriptManager_api_server.py` | HTTP API server (GUI panel can start/stop; avoid restart-all on API task) |
 | `api_config.json`   | API auto-start settings (optional)       |
@@ -652,26 +668,20 @@ When using SmartPacker or similar GUI tools, add exclude module arguments:
   - Local and public IP are both loaded asynchronously after main loop starts (non-blocking startup); public IP checks network reachability first and shows "Unable to get IP" when offline
   - Shows "Unable to get IP address" if public IP fetch fails
   - When filter row content is too wide, a horizontal scrollbar automatically appears on the right for scrolling
-- **Config Save**: Saves to a temp file then replaces the original to avoid corruption on interrupt; status bar shows an error if save fails
-- **Minimize on start**: **Settings** menu → **Minimize to taskbar on start** (saved in `app_config.json`); `python main.py --minimized` applies once per launch. If login auto-start is enabled, toggling minimize updates the startup command. No tray icon—restore from the taskbar; use CLI/API for headless operation
-- **Stop & Status**: Clicking "Stop" on already-stopped items shows "Selected item(s) already stopped" in status bar; items with invalid path show "Path invalid" in status column
-- **Export/Import Config**: Export saves all configurations (excluding runtime state like PID); when importing, "Merge" skips existing paths, "Replace" clears all then imports
+- **Config Save**: Atomic write + automatic `.bak`; restore from Settings if needed
+- **Minimize / Tray**: Settings → minimize to taskbar and/or tray on close (`app_config.json`); tray via ctypes (no Pillow); CLI/API for headless use
+- **Stop & Status**: Already-stopped items show a status hint; invalid paths show "Path invalid"; start failures show a concrete reason + diagnose dialog
+- **Export/Import Config**: Export omits runtime PID; merge skips existing paths; replace clears then imports
 - **Scheduled Tasks**:
-  - Supports ten types: daily, hourly, minutely, weekly, monthly, every N hours, quarterly, yearly, once, weekday
-  - Supports three behaviors: start, restart, stop
-  - Check frequency is every 10 seconds
-  - For stop behavior, remains effective after time arrives until execution completes
-  - "Once" type auto-disables after execution
-  - CLI and API both support full schedule parameter configuration
+  - Ten schedule types; start/restart/stop actions; 10s check interval
+  - "Once" auto-disables after run; toolbar **Schedules** overview for next runs
+  - Full schedule params via CLI/API
 - **Execution History**:
-  - Automatically records each script execution (start time, stop time, runtime, exit code, status)
-  - Each script keeps up to 100 most recent records
-  - History saved to `execution_history.json`
-  - Supports viewing statistics (total count, success count, failure count, average runtime)
+  - Up to 100 records per script in `execution_history.json`
+  - Statistics, date filter, CSV export
 - **Exception Notifications**:
-  - Configurable notification conditions: non-zero exit code, quick exit (default <5 seconds, configurable threshold)
-  - Supports Webhook notifications: GET or POST requests, data includes script name, exception reason, exit code, runtime, timestamp
-  - Notification config saved to `notification_config.json`
+  - Conditions: non-zero exit / quick exit; Webhook GET/POST with up to 2 retries
+  - Config in `notification_config.json`
 - **Batch Edit**:
   - Supports batch modification of group, interpreter
   - Supports batch enable/disable scheduled tasks, keep-alive, log output
