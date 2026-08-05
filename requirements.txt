@@ -1,0 +1,20 @@
+# 批处理管理器依赖
+# psutil：用于获取进程、端口、进程树；未安装时自动降级为 netstat/tasklist
+psutil>=5.9.0
+
+# 可选：Windows 下支持从资源管理器拖文件到窗口新增任务
+# pip install windnd
+# windnd>=1.0.0
+
+# 可选：API 服务（WindowsBatchScriptManager_api_server.py）供另一台机器 HTTP 调用 CLI
+# pip install fastapi "uvicorn[standard]"
+# fastapi>=0.100.0
+# uvicorn[standard]>=0.22.0
+
+# 可选：暗色主题
+# pip install sv-ttk
+# sv-ttk>=2.0.0
+
+# 可选：性能曲线监控
+# pip install matplotlib
+# matplotlib>=3.5.0

@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.spec
+!build_exe.spec
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 配置文件（包含用户数据）
+config.json
+execution_history.json
+notification_config.json
+WindowsBatchScriptManager_scripts.json
+WindowsBatchScriptManager_scripts.json.bak
+app_config.json
+api_config.json
+language_config.json
+watched_folders.json
+*.before_restore.bak
+batmanager_config_backup.json
+*_config_backup.json
+
+# 日志
+logs/
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 可执行文件（开发环境）
+*.exe
