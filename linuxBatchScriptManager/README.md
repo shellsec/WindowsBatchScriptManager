@@ -1,6 +1,6 @@
 # LinuxBatchScriptManager
 
-Linux 独立版脚本管理器，功能与 [WindowsBatchScriptManager](https://github.com/shellsec/WindowsBatchScriptManager) 一致，仅包含 Linux 平台实现，可单独克隆、在 Linux 上运行。
+Linux 平台实现（`platform_impl`）。日常请在上一级仓库根目录运行跨平台 `main.py`。
 
 ## 说明
 
@@ -9,6 +9,8 @@ Linux 独立版脚本管理器，功能与 [WindowsBatchScriptManager](https://g
 - **脚本启动**：使用 `python3` / `node` / `bash` 等解释器，在后台 subprocess 运行（不新开终端窗口）。
 
 ## 依赖
+
+在仓库根目录安装：
 
 ```bash
 pip install -r requirements.txt
@@ -19,20 +21,19 @@ pip install -r requirements.txt
 
 ## 运行
 
-**推荐**：在上一级 **WindowsBatchScriptManager** 仓库根目录执行 `python3 main.py`（自动加载本目录的 `platform_impl`）。
-
-本目录独立运行：
+**推荐**：在上一级 **WindowsBatchScriptManager** 仓库根目录执行（自动加载本目录的 `platform_impl`）：
 
 ```bash
 python3 main.py
 ```
 
+本目录 `main.py` 只是薄启动器，同样转到根目录 `main.py`，避免功能落后。根目录 GUI 已包含：HTTP 任务 GET/POST 与自定义请求头（如 `X-API-Key`）、工具栏「一键加载API调用」「打开工具目录」、API 独立启停等。细节见主仓库 [README](../README.md)。
+
 - **GUI**：无参数启动即打开图形界面。
 - **CLI**：带参数时走命令行，例如 `python3 main.py --list --json`、`python3 main.py --start-all`。
-- 若在非 Linux 下运行会提示「仅支持 Linux」并退出；若未加载到 `linuxBatchScriptManager` 会提示在项目根目录运行。
 
 跨平台自测步骤见主仓库 [README](../README.md) 中 **「macOS / Linux 快速验证」**。
 
 ## 与主仓库关系
 
-本目录为**独立项目**，可单独发布为独立仓库；主仓库 `WindowsBatchScriptManager` 中的 `linuxBatchScriptManager/` 为同一实现，供跨平台版 `main.py` 在 Linux 上加载。
+本目录提供 Linux `platform_impl`，并可单独发布；主程序始终是仓库根目录的 `main.py`。

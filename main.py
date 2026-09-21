@@ -128,7 +128,7 @@ def diagnose_start_item(it: dict) -> str:
         lines.append("interpreter: %s -> %s" % (exe, shutil.which(exe.split()[0]) or (exe if os.path.isfile(exe) else "NOT FOUND")))
     return "\n".join(lines)
 
-# 可选：Windows 下支持从资源管理器拖文件到窗口新增任务（pip install windnd）
+# 可选：Windows 下 windnd 作为拖放后备（pip install windnd）；exe 用 ctypes 原生 WM_DROPFILES，不依赖该库
 try:
     if sys.platform == "win32":
         import windnd
@@ -137,6 +137,72 @@ try:
         HAS_WINDND = False
 except Exception:
     HAS_WINDND = False
+
+WM_DROPFILES = 0x0233
+GWL_WNDPROC = -4
+
+
+def _win_toplevel_hwnd(widget) -> int:
+    """Tk 控件对应的顶层 HWND（托盘图标挂在这层）。"""
+    import ctypes
+    hwnd = int(widget.winfo_id())
+    user32 = ctypes.windll.user32
+    parent = user32.GetParent(hwnd)
+    while parent:
+        hwnd = parent
+        parent = user32.GetParent(hwnd)
+    return hwnd
+
+
+def _win_user32_wndproc_api():
+    """64 位安全的窗口过程 API。不设 argtypes 时指针会被截成 32 位，窗口随即闪退。"""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    HWND = wintypes.HWND
+    UINT = wintypes.UINT
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        LRESULT = ctypes.c_int64
+        WPARAM = ctypes.c_uint64
+        LPARAM = ctypes.c_int64
+        set_long = user32.SetWindowLongPtrW
+        get_long = user32.GetWindowLongPtrW
+    else:
+        LRESULT = ctypes.c_long
+        WPARAM = ctypes.c_uint
+        LPARAM = ctypes.c_long
+        set_long = user32.SetWindowLongW
+        get_long = user32.GetWindowLongW
+    set_long.argtypes = [HWND, ctypes.c_int, ctypes.c_void_p]
+    set_long.restype = ctypes.c_void_p
+    get_long.argtypes = [HWND, ctypes.c_int]
+    get_long.restype = ctypes.c_void_p
+    call = user32.CallWindowProcW
+    call.argtypes = [ctypes.c_void_p, HWND, UINT, WPARAM, LPARAM]
+    call.restype = LRESULT
+    WNDPROC = ctypes.WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM)
+    return WNDPROC, set_long, get_long, call
+
+
+def _win_hdrop_paths(hdrop) -> list:
+    """从 HDROP 取出文件路径列表。"""
+    import ctypes
+    from ctypes import wintypes
+    shell32 = ctypes.windll.shell32
+    dq = shell32.DragQueryFileW
+    dq.argtypes = [ctypes.c_void_p, wintypes.UINT, ctypes.c_wchar_p, wintypes.UINT]
+    dq.restype = wintypes.UINT
+    shell32.DragFinish.argtypes = [ctypes.c_void_p]
+    hd = ctypes.c_void_p(int(hdrop) if hdrop else 0)
+    count = dq(hd, 0xFFFFFFFF, None, 0)
+    out = []
+    buf = ctypes.create_unicode_buffer(32768)
+    for i in range(int(count or 0)):
+        n = dq(hd, i, buf, len(buf))
+        if n:
+            out.append(buf.value)
+    shell32.DragFinish(hd)
+    return out
 
 # 获取实际程序路径（支持 PyInstaller 打包）
 def get_app_path():
@@ -297,6 +363,7 @@ LANGUAGES = {
         "btn_clear_invalid": "清除无效项",
         "btn_notification": "通知配置",
         "btn_stop_all_batch": "停止软件外所有批处理",
+        "btn_open_tool_folder": "打开工具目录",
         "msg_clear_invalid_confirm": "发现 %d 个路径失效或无效的项（脚本不存在或路径为空），是否一键删除？",
         "msg_no_invalid": "未发现路径失效或无效的项。",
         "status_cleared_invalid": "已清除 %d 个无效项",
@@ -309,8 +376,10 @@ LANGUAGES = {
         "label_search_keyword": "关键词:",
         "btn_locate": "定位",
         "btn_next_match": "下一个",
+        "hint_search_keyword": "匹配名称、路径、工作目录、分组；空格分隔多个词；Esc 清空",
         "msg_search_no_match": "未找到包含「%s」的项",
         "msg_search_located": "已定位到第 %d 项",
+        "msg_search_filtered": "匹配 %d / %d",
         "label_local_ip": "本地IP:",
         "label_public_ip": "外网IP:",
         "hint_click_to_copy": "(点击复制)",
@@ -418,9 +487,13 @@ LANGUAGES = {
         "label_interpreter": "解释器:",
         "label_task_type": "任务类型:",
         "label_request_url": "请求 URL:",
+        "label_http_method": "请求方法:",
+        "label_http_headers": "请求头:",
         "label_process_name": "进程名称:",
         "label_command": "命令:",
         "hint_request_url": "输入 http:// 或 https:// 地址",
+        "hint_http_headers": "(每行 Header: Value，如 X-API-Key: change-me-in-production)",
+        "btn_fill_local_api": "填入本机API",
         "hint_process_name": "输入进程名，如 explorer.exe",
         "hint_command": "直接输入命令，如 ping 8.8.8.8、ipconfig、python -c \"print('hello')\"",
         "label_auto_restart": "保活:",
@@ -702,6 +775,14 @@ LANGUAGES = {
         "refresh_interval_8s": "8 秒",
         "status_refresh_interval_set": "刷新间隔已设为 %d 秒",
         "menu_start_minimized": "启动后最小化到任务栏",
+        "menu_mark_running_launch_on_start": "将当前运行中设为启动时自动启动",
+        "dialog_mark_running_launch_on_start": "将当前运行中设为启动时自动启动",
+        "label_mark_running_list": "当前运行中的任务（%d 项）：",
+        "check_mark_running_clear_stopped": "同时取消未运行任务的「启动时自动启动」",
+        "hint_mark_running": "确定后写入配置。下次打开本工具会自动启动这些任务；若要开机就跑，请再打开菜单「开机启动」。",
+        "msg_mark_running_none": "当前没有运行中的任务。请先启动要随本工具自动跑的任务，再使用本功能。",
+        "status_mark_running_done": "已为 %d 个运行中任务勾选启动时自动启动（新勾选 %d）",
+        "status_mark_running_cleared": "，已取消未运行 %d 项",
         "check_launch_on_app_start": "启动本工具时自动启动",
         "status_refresh_paused": "已暂停定时刷新；保活、运行中接管会停止，可点「刷新状态」或「恢复刷新」",
         "status_history_cleared": "已清除历史记录",
@@ -756,11 +837,11 @@ LANGUAGES = {
         "dialog_tail_log": "实时日志 - %s",
         "btn_tail_stop": "停止",
         "btn_tail_clear": "清空",
-        # ---- 重启自身 ----
-        "btn_restart_self": "重启自己",
+        # ---- 重启工具 ----
+        "btn_restart_self": "重启工具",
         "msg_restart_self_confirm": "确定要重启管理器吗？\n运行中的脚本将继续运行，重启后自动恢复管理。",
         # ---- 系统关机/重启 ----
-        "btn_shutdown": "关机",
+        "btn_shutdown": "关闭系统",
         "btn_reboot": "重启系统",
         "msg_shutdown_confirm": "确定要关闭 Windows 吗？\n将先停止所有托管脚本，再正常关机。",
         "msg_reboot_confirm": "确定要重启 Windows 吗？\n将先停止所有托管脚本，再正常重启。",
@@ -780,9 +861,19 @@ LANGUAGES = {
         "msg_api_stopped": "API 已停止",
         "msg_api_restarted": "API 已重启 PID=%s",
         "msg_api_start_failed": "API 启动失败",
-        "msg_api_deps_missing": "API 依赖未安装，请先执行:\npip install fastapi uvicorn[standard]",
         "msg_api_stop_failed": "API 停止失败",
         "check_launch_api_on_start": "启动本工具时自动启动API",
+        "btn_load_api_calls": "一键加载API调用",
+        "group_local_api": "本机API",
+        "status_api_call_hint": "API: %s  一键加载可写入HTTP调用任务",
+        "msg_api_calls_loaded": "已添加 %d 条，更新 %d 条。\n\nid=1 只是示例，请按实际任务 ID 修改 URL。",
+        "api_task_list": "列表",
+        "api_task_status": "状态(id=1)",
+        "api_task_start": "启动(id=1)",
+        "api_task_stop": "停止(id=1)",
+        "api_task_restart": "重启(id=1)",
+        "api_task_start_all": "全部启动",
+        "api_task_stop_all": "全部停止",
         # ---- 系统托盘 ----
         "tray_show": "显示主窗口",
         "tray_quit": "退出",
@@ -824,6 +915,7 @@ LANGUAGES = {
         "btn_clear_invalid": "Clear Invalid",
         "btn_notification": "Notifications",
         "btn_stop_all_batch": "Stop All Batch",
+        "btn_open_tool_folder": "Open tool folder",
         "msg_clear_invalid_confirm": "Found %d items with missing or invalid script path (file not found or path empty). Delete them?",
         "msg_no_invalid": "No invalid items found.",
         "status_cleared_invalid": "Cleared %d invalid items",
@@ -836,8 +928,10 @@ LANGUAGES = {
         "label_search_keyword": "Keyword:",
         "btn_locate": "Locate",
         "btn_next_match": "Next",
+        "hint_search_keyword": "Matches name, path, work dir, group; space-separated words; Esc to clear",
         "msg_search_no_match": "No item containing '%s'",
         "msg_search_located": "Located at item %d",
+        "msg_search_filtered": "Matched %d / %d",
         "label_local_ip": "Local IP:",
         "label_public_ip": "Public IP:",
         "hint_click_to_copy": "(Click to copy)",
@@ -945,9 +1039,13 @@ LANGUAGES = {
         "label_interpreter": "Interpreter:",
         "label_task_type": "Task Type:",
         "label_request_url": "Request URL:",
+        "label_http_method": "HTTP Method:",
+        "label_http_headers": "Headers:",
         "label_process_name": "Process Name:",
         "label_command": "Command:",
         "hint_request_url": "Enter http:// or https:// URL",
+        "hint_http_headers": "(one Header: Value per line, e.g. X-API-Key: change-me-in-production)",
+        "btn_fill_local_api": "Fill Local API",
         "hint_process_name": "Enter process name, e.g. explorer.exe",
         "hint_command": "Enter command directly, e.g. ping 8.8.8.8, ipconfig, python -c \"print('hello')\"",
         "label_auto_restart": "Keep Alive:",
@@ -1251,6 +1349,14 @@ LANGUAGES = {
         "refresh_interval_4s": "4 sec",
         "refresh_interval_8s": "8 sec",
         "menu_start_minimized": "Minimize to taskbar on start",
+        "menu_mark_running_launch_on_start": "Mark running tasks to auto-start with app",
+        "dialog_mark_running_launch_on_start": "Mark running tasks to auto-start",
+        "label_mark_running_list": "Currently running tasks (%d):",
+        "check_mark_running_clear_stopped": "Also turn off auto-start for tasks that are not running",
+        "hint_mark_running": "Saves to config. These tasks start the next time this app launches. To run them at login, also enable the Startup menu.",
+        "msg_mark_running_none": "No tasks are running. Start the tasks you want on app launch, then use this again.",
+        "status_mark_running_done": "Set auto-start on %d running task(s) (%d newly checked)",
+        "status_mark_running_cleared": ", cleared auto-start on %d stopped task(s)",
         "status_refresh_paused": "Refresh paused; keep-alive and running adoption stopped, click 'Refresh' or 'Resume Refresh'",
         "status_history_cleared": "History cleared",
         "status_notification_saved": "Notification config saved",
@@ -1283,11 +1389,11 @@ LANGUAGES = {
         "dialog_tail_log": "Live Log - %s",
         "btn_tail_stop": "Stop",
         "btn_tail_clear": "Clear",
-        # ---- Restart Self ----
-        "btn_restart_self": "Restart Self",
+        # ---- Restart Tool ----
+        "btn_restart_self": "Restart Tool",
         "msg_restart_self_confirm": "Restart the manager?\nRunning scripts will continue, and will be re-adopted after restart.",
         # ---- System Shutdown/Reboot ----
-        "btn_shutdown": "Shutdown",
+        "btn_shutdown": "Shutdown System",
         "btn_reboot": "Reboot System",
         "msg_shutdown_confirm": "Shut down Windows?\nAll managed scripts will be stopped first, then normal shutdown.",
         "msg_reboot_confirm": "Reboot Windows?\nAll managed scripts will be stopped first, then normal reboot.",
@@ -1307,9 +1413,19 @@ LANGUAGES = {
         "msg_api_stopped": "API stopped",
         "msg_api_restarted": "API restarted PID=%s",
         "msg_api_start_failed": "Failed to start API",
-        "msg_api_deps_missing": "API dependencies missing. Run:\npip install fastapi uvicorn[standard]",
         "msg_api_stop_failed": "Failed to stop API",
         "check_launch_api_on_start": "Launch API when app starts",
+        "btn_load_api_calls": "Load API Calls",
+        "group_local_api": "Local API",
+        "status_api_call_hint": "API: %s  Use Load API Calls to add HTTP tasks",
+        "msg_api_calls_loaded": "Added %d, updated %d.\n\nid=1 is only an example; change the URL to a real task ID.",
+        "api_task_list": "List",
+        "api_task_status": "Status (id=1)",
+        "api_task_start": "Start (id=1)",
+        "api_task_stop": "Stop (id=1)",
+        "api_task_restart": "Restart (id=1)",
+        "api_task_start_all": "Start All",
+        "api_task_stop_all": "Stop All",
         # ---- System Tray ----
         "tray_show": "Show Window",
         "tray_quit": "Quit",
@@ -1555,6 +1671,8 @@ def config_item_to_save(it: dict) -> dict:
         "delay_after_dep": it.get("delay_after_dep", 0),
         "args": it.get("args", ""),
         "env_vars": it.get("env_vars", ""),
+        "http_method": it.get("http_method") or "GET",
+        "http_headers": it.get("http_headers") or "",
         "startup_timeout": it.get("startup_timeout", 0),
         "schedule_valid_from": it.get("schedule_valid_from", ""),
         "schedule_valid_until": it.get("schedule_valid_until", ""),
@@ -2093,6 +2211,51 @@ def is_system_power_task(it) -> bool:
     return sa in ("shutdown", "reboot")
 
 
+def item_is_currently_running(it: dict) -> bool:
+    """列表项是否有仍在运行的 PID（关机/重启类任务不算）。"""
+    if not isinstance(it, dict) or is_system_power_task(it):
+        return False
+    pid = it.get("pid")
+    if not pid:
+        return False
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    return is_process_running(pid)
+
+
+def apply_mark_running_as_launch_on_start(
+    items: list,
+    running_ids=None,
+    clear_stopped: bool = False,
+) -> dict:
+    """把指定（或当前运行中）的任务勾上 launch_on_app_start（可选取消未运行项）。原地修改 items。"""
+    if running_ids is None:
+        running_id_set = {it.get("id") for it in items if item_is_currently_running(it)}
+    else:
+        running_id_set = set(running_ids)
+    n_running = 0
+    n_enabled = 0
+    n_cleared = 0
+    for it in items:
+        if not isinstance(it, dict) or is_system_power_task(it):
+            continue
+        if it.get("id") in running_id_set:
+            n_running += 1
+            if not it.get("launch_on_app_start"):
+                it["launch_on_app_start"] = True
+                n_enabled += 1
+        elif clear_stopped and it.get("launch_on_app_start"):
+            it["launch_on_app_start"] = False
+            n_cleared += 1
+    return {
+        "running": n_running,
+        "enabled": n_enabled,
+        "cleared": n_cleared,
+    }
+
+
 def get_system_power_action_for_task(it) -> str:
     st = (it.get("script_type") or "").strip().lower()
     if st == "system_shutdown":
@@ -2170,16 +2333,179 @@ def start_api_server() -> Optional[subprocess.Popen]:
     if not path:
         return None
     work_dir = str(Path(path).parent)
-    return start_script(path, work_dir, "python", detach_on_windows=True)
+    return start_script(path, work_dir, "python", detach_on_windows=True, extra_args="--docs")
 
 
-def api_server_deps_available() -> bool:
-    """API 服务脚本依赖 fastapi + uvicorn 是否已安装（find_spec，避免 PyInstaller 误打包 API 栈）。"""
-    import importlib.util
-    return (
-        importlib.util.find_spec("fastapi") is not None
-        and importlib.util.find_spec("uvicorn") is not None
-    )
+_API_DEFAULT_PORT = 8765
+_API_AUTH_HEADER = "X-API-Key"
+_API_POST_PATH_NAMES = frozenset({"start", "stop", "restart", "start-all", "stop-all"})
+_API_PATH_MARKERS = ("/list", "/start", "/stop", "/restart", "/status", "/start-all", "/stop-all")
+LOCAL_API_GROUP_NAMES = ("本机API", "Local API")
+API_CALL_TASK_PRESETS = (
+    ("api_task_list", "GET", "/list"),
+    ("api_task_status", "GET", "/status?id=1"),
+    ("api_task_start", "POST", "/start?id=1"),
+    ("api_task_stop", "POST", "/stop?id=1"),
+    ("api_task_restart", "POST", "/restart?id=1"),
+    ("api_task_start_all", "POST", "/start-all"),
+    ("api_task_stop_all", "POST", "/stop-all"),
+)
+
+
+def read_api_server_launch_settings(script_path: Optional[str] = None) -> dict:
+    """从 API 脚本常量 / 环境变量读取 Key、鉴权、默认端口（与 GUI 启动方式一致：仅 --docs）。"""
+    port = _API_DEFAULT_PORT
+    file_default_key = "change-me-in-production"
+    disable_auth = False
+    path = script_path or get_api_server_script_path()
+    text = ""
+    if path and os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception:
+            text = ""
+    if text:
+        m = re.search(
+            r'^API_KEY\s*=\s*os\.environ\.get\(\s*["\']API_KEY["\']\s*,\s*["\']([^"\']*)["\']',
+            text,
+            re.M,
+        )
+        if m:
+            file_default_key = m.group(1)
+        else:
+            m = re.search(r'^API_KEY\s*=\s*["\']([^"\']*)["\']', text, re.M)
+            if m:
+                file_default_key = m.group(1)
+        m = re.search(r'^DISABLE_AUTH\s*=\s*(True|False)\s*$', text, re.M)
+        if m:
+            disable_auth = m.group(1) == "True"
+        m = re.search(r'add_argument\(\s*["\']--port["\'][^)]*default\s*=\s*(\d+)', text)
+        if m:
+            try:
+                port = int(m.group(1))
+            except ValueError:
+                pass
+    env_key = os.environ.get("API_KEY")
+    api_key = env_key if env_key else file_default_key
+    return {
+        "port": port,
+        "api_key": api_key,
+        "auth_enabled": not disable_auth,
+        "auth_header": _API_AUTH_HEADER,
+    }
+
+
+def _looks_like_ipv4(s: str) -> bool:
+    return bool(re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", (s or "").strip()))
+
+
+def build_api_call_config(lan_ip: Optional[str] = None) -> dict:
+    """构造写入 api_config.json 的 call 块。"""
+    settings = read_api_server_launch_settings()
+    ip = (lan_ip or "").strip()
+    if not _looks_like_ipv4(ip):
+        got = get_local_ip()
+        ip = got if _looks_like_ipv4(got) else "127.0.0.1"
+    port = int(settings.get("port") or _API_DEFAULT_PORT)
+    base_url = "http://%s:%s" % (ip, port)
+    auth_enabled = bool(settings.get("auth_enabled"))
+    return {
+        "base_url": base_url,
+        "port": port,
+        "docs_url": base_url + "/",
+        "auth_header": settings.get("auth_header") or _API_AUTH_HEADER,
+        "auth_enabled": auth_enabled,
+        "api_key": (settings.get("api_key") or "") if auth_enabled else "",
+    }
+
+
+def resolve_api_call_config(lan_ip: Optional[str] = None) -> dict:
+    """优先用已持久化的 call（含启动时记录的局域网 IP），Key/端口仍以服务端脚本为准。"""
+    built = build_api_call_config(lan_ip)
+    saved = load_api_config()
+    call = saved.get("call") if isinstance(saved, dict) else None
+    if not isinstance(call, dict):
+        return built
+    out = dict(built)
+    saved_base = (call.get("base_url") or "").strip().rstrip("/")
+    if saved_base:
+        out["base_url"] = saved_base
+        out["docs_url"] = (call.get("docs_url") or (saved_base + "/")).strip() or (saved_base + "/")
+    return out
+
+
+def api_http_method_for_url(url: str) -> str:
+    raw = (url or "").strip()
+    if "://" not in raw:
+        raw = "http://local" + (raw if raw.startswith("/") else "/" + raw)
+    path = (urllib.parse.urlparse(raw).path or "/").rstrip("/")
+    name = path.rsplit("/", 1)[-1].lower()
+    return "POST" if name in _API_POST_PATH_NAMES else "GET"
+
+
+def rewrite_url_to_local_api(current: str, call_cfg: dict) -> str:
+    """空则填 /list；相对路径加 base；已是本机 API 的绝对 URL 则改 host，其它 host 不覆盖。"""
+    base = ((call_cfg or {}).get("base_url") or "").rstrip("/")
+    port = int((call_cfg or {}).get("port") or _API_DEFAULT_PORT)
+    current = (current or "").strip()
+    if not current:
+        return base + "/list"
+    if current.startswith("/"):
+        return base + current
+    if current.startswith("http://") or current.startswith("https://"):
+        p = urllib.parse.urlparse(current)
+        path = p.path or "/"
+        path_l = path.lower()
+        looks = False
+        try:
+            looks = p.port == port
+        except ValueError:
+            looks = False
+        if any(path_l == m or path_l.startswith(m + "/") for m in _API_PATH_MARKERS):
+            looks = True
+        if looks:
+            q = ("?" + p.query) if p.query else ""
+            return base + path + q
+        return current
+    return base + "/" + current.lstrip("/")
+
+
+def format_api_key_headers(api_key: str, auth_enabled: bool) -> str:
+    if not auth_enabled:
+        return ""
+    return "%s: %s" % (_API_AUTH_HEADER, api_key or "")
+
+
+def ensure_api_key_header_line(existing: str, api_key: str, auth_enabled: bool) -> str:
+    if not auth_enabled:
+        return existing or ""
+    wanted = "%s: %s" % (_API_AUTH_HEADER, api_key or "")
+    lines = []
+    found = False
+    for line in (existing or "").replace("\r\n", "\n").split("\n"):
+        stripped = line.strip()
+        if stripped.lower().startswith("x-api-key"):
+            lines.append(wanted)
+            found = True
+        elif stripped:
+            lines.append(line)
+    if not found:
+        lines.append(wanted)
+    return "\n".join(lines)
+
+
+def _http_endpoint_key(url, method) -> tuple:
+    raw = (url or "").strip()
+    p = urllib.parse.urlparse(raw)
+    path = (p.path or "/").rstrip("/") or "/"
+    return (normalize_http_method(method), path.lower(), p.query)
+
+
+def _is_http_task_item(it: dict) -> bool:
+    st = (it.get("script_type") or "")
+    path = (it.get("path") or "")
+    return st == "http_get" or path.startswith("http://") or path.startswith("https://")
 
 
 def is_service_whitelisted(path: str) -> bool:
@@ -2378,6 +2704,50 @@ def scan_running_exe_processes() -> list:
 # 运行脚本
 # ---------------------------------------------------------------------------
 
+def parse_http_headers(raw) -> list:
+    """解析 HTTP 请求头，每行 Name: Value 或 Name=Value。返回 [(name, value), ...]。"""
+    headers = []
+    if not raw:
+        return headers
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            k = str(k).strip()
+            if k:
+                headers.append((k, "" if v is None else str(v)))
+        return headers
+    for line in str(raw).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line:
+            k, v = line.split(":", 1)
+        elif "=" in line:
+            k, v = line.split("=", 1)
+        else:
+            continue
+        k, v = k.strip(), v.strip()
+        if k:
+            headers.append((k, v))
+    return headers
+
+
+def normalize_http_method(method) -> str:
+    m = (method or "GET").strip().upper()
+    return m if m in ("GET", "POST") else "GET"
+
+
+def build_http_request_curl_args(curl_exe: str, url: str, method=None, headers_raw=None) -> list:
+    """构造 curl 参数（缺省 GET、无额外请求头）。"""
+    args = [curl_exe, "-s", "-o", os.devnull, "-w", "%{http_code}", "--max-time", "30", "--connect-timeout", "10"]
+    method = normalize_http_method(method)
+    if method != "GET":
+        args.extend(["-X", method])
+    for k, v in parse_http_headers(headers_raw):
+        args.extend(["-H", "%s: %s" % (k, v)])
+    args.append(url)
+    return args
+
+
 def start_script(
     path: str,
     work_dir: Optional[str],
@@ -2387,6 +2757,8 @@ def start_script(
     detach_on_windows: bool = False,
     extra_args: Optional[str] = None,
     env_vars: Optional[str] = None,
+    http_method: Optional[str] = None,
+    http_headers: Optional[str] = None,
 ) -> Optional[subprocess.Popen]:
     path = (path or "").strip()
     _set_start_error("")
@@ -2428,27 +2800,35 @@ def start_script(
     elif is_http_get:
         import shutil
         # Windows 10+ 自带 curl.exe，Linux/Mac 也都有
+        method = normalize_http_method(http_method)
+        headers_raw = http_headers or ""
         curl_exe = shutil.which("curl")
         if curl_exe:
-            args = [curl_exe, "-s", "-o", os.devnull, "-w", "%{http_code}", "--max-time", "30", "--connect-timeout", "10", path]
+            args = build_http_request_curl_args(curl_exe, path, method, headers_raw)
         else:
             # 回退：查找系统 python 执行 urllib 请求
             python_exe = shutil.which("python") or shutil.which("python3") or shutil.which("py")
-            # 使用 json.dumps 安全转义 URL，避免单引号注入
+            # 使用 json.dumps 安全转义，避免单引号注入
             _safe_url = json.dumps(path)
+            _safe_method = json.dumps(method)
+            _safe_headers = json.dumps(dict(parse_http_headers(headers_raw)))
+            _py = (
+                "import urllib.request;"
+                "req=urllib.request.Request(%s,data=(b'' if %s!='GET' else None),method=%s,headers=%s);"
+                "r=urllib.request.urlopen(req,timeout=30); print(r.status)"
+            ) % (_safe_url, _safe_method, _safe_method, _safe_headers)
             if python_exe:
-                args = [python_exe, "-c", f"import urllib.request; r=urllib.request.urlopen({_safe_url},timeout=30); print(r.status)"]
+                args = [python_exe, "-c", _py]
             elif not getattr(sys, 'frozen', False):
                 # 开发环境可用当前解释器
-                args = [sys.executable, "-c", f"import urllib.request; r=urllib.request.urlopen({_safe_url},timeout=30); print(r.status)"]
+                args = [sys.executable, "-c", _py]
             else:
-                # 打包后的 exe 且无 curl、无 python：直接用 urllib 发请求（同步，会阻塞但不影响主线程因为是子进程）
-                # 创建临时脚本执行
+                # 打包后的 exe 且无 curl、无 python：写临时脚本用 urllib 发请求
                 import tempfile
                 tmp_script = os.path.join(tempfile.gettempdir(), f"_http_get_{os.getpid()}_{int(time.time())}.py")
                 try:
                     with open(tmp_script, "w", encoding="utf-8") as f:
-                        f.write(f"import urllib.request,sys,os; r=urllib.request.urlopen({_safe_url},timeout=30); print(r.status); os.remove(__file__); sys.exit(0)")
+                        f.write(_py + "; import os,sys; os.remove(__file__); sys.exit(0)")
                     args = [sys.executable, tmp_script]
                 except Exception:
                     _set_start_error("http request helper create failed")
@@ -2774,6 +3154,11 @@ class AddEditDialog(tk.Toplevel):
 
         self.var_name = tk.StringVar(value=initial.get("name", ""))
         self.var_path = tk.StringVar(value=initial.get("path", ""))
+        _init_http_method = (initial.get("http_method") or "GET").strip().upper()
+        if _init_http_method not in ("GET", "POST"):
+            _init_http_method = "GET"
+        self.var_http_method = tk.StringVar(value=_init_http_method)
+        self.var_http_headers = tk.StringVar(value=initial.get("http_headers", "") or "")
         self.var_work = tk.StringVar(value=initial.get("work_dir", ""))
         self.var_group = tk.StringVar(value=initial.get("group", ""))
         self.var_interpreter = tk.StringVar(value=initial.get("interpreter", "") or initial.get("python_exe", ""))
@@ -2974,6 +3359,26 @@ class AddEditDialog(tk.Toplevel):
         row += 1
         self.label_path_hint = ttk.Label(tab_basic, text="", foreground="gray")
         self.label_path_hint.grid(row=row, column=0, columnspan=3, sticky=tk.W, padx=6, pady=(0, 2))
+        row += 1
+        self._http_opts_frame = ttk.Frame(tab_basic)
+        self._http_opts_frame.grid(row=row, column=0, columnspan=3, sticky=tk.EW, padx=6, pady=2)
+        self._http_opts_frame.columnconfigure(1, weight=1)
+        ttk.Label(self._http_opts_frame, text=self._lang["label_http_method"]).grid(row=0, column=0, sticky=tk.W, padx=(0, 6), pady=2)
+        http_method_row = ttk.Frame(self._http_opts_frame)
+        http_method_row.grid(row=0, column=1, sticky=tk.W, padx=4, pady=2)
+        self.combo_http_method = ttk.Combobox(
+            http_method_row, textvariable=self.var_http_method,
+            values=["GET", "POST"], state="readonly", width=10,
+        )
+        self.combo_http_method.pack(side=tk.LEFT)
+        self.btn_fill_local_api = ttk.Button(
+            http_method_row, text=self._lang["btn_fill_local_api"],
+            command=self._on_fill_local_api,
+        )
+        self.btn_fill_local_api.pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(self._http_opts_frame, text=self._lang["label_http_headers"]).grid(row=1, column=0, sticky=tk.NW, padx=(0, 6), pady=2)
+        ttk.Entry(self._http_opts_frame, textvariable=self.var_http_headers, width=50).grid(row=1, column=1, sticky=tk.EW, padx=4, pady=2)
+        ttk.Label(self._http_opts_frame, text=self._lang["hint_http_headers"], foreground="gray").grid(row=2, column=1, sticky=tk.W, padx=4, pady=(0, 2))
         row += 1
         ttk.Label(tab_basic, text=self._lang["label_work_dir"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
         fwork = ttk.Frame(tab_basic)
@@ -3179,6 +3584,10 @@ class AddEditDialog(tk.Toplevel):
                     widget.config(text=self._lang["label_script_path"])
                 elif text in ["请求 URL:", "Request URL:"]:
                     widget.config(text=self._lang["label_request_url"])
+                elif text in ["请求方法:", "HTTP Method:"]:
+                    widget.config(text=self._lang["label_http_method"])
+                elif text in ["请求头:", "Headers:"]:
+                    widget.config(text=self._lang["label_http_headers"])
                 elif text in ["进程名称:", "Process Name:"]:
                     widget.config(text=self._lang["label_process_name"])
                 elif text in ["命令:", "Command:"]:
@@ -3199,6 +3608,8 @@ class AddEditDialog(tk.Toplevel):
                     widget.config(text=self._lang["label_interpreter_shell"])
                 elif "(留空=无分组" in text or "(empty = no group" in text:
                     widget.config(text=self._lang["hint_group_empty"])
+                elif "X-API-Key" in text and ("Header" in text or "请求头" in text or "每行" in text or "one Header" in text):
+                    widget.config(text=self._lang["hint_http_headers"])
                 elif "(留空=当前" in text or "(empty = current" in text:
                     widget.config(text=self._lang["hint_python_interpreter"])
                 elif "(留空=node" in text:
@@ -3253,6 +3664,8 @@ class AddEditDialog(tk.Toplevel):
                     widget.config(text=self._lang["btn_browse"])
                 elif "自动识别" in text or "Auto Detect" in text:
                     widget.config(text=self._lang["btn_auto_detect"])
+                elif text in ["填入本机API", "Fill Local API"]:
+                    widget.config(text=self._lang["btn_fill_local_api"])
                 elif "测试 Webhook" in text or "Test Webhook" in text:
                     widget.config(text=self._lang["btn_test"])
                 elif text in ["0点", "0:00"]:
@@ -3519,6 +3932,8 @@ class AddEditDialog(tk.Toplevel):
     def _on_task_type_changed(self, event=None):
         """类型下拉框切换时，更新标签、提示和浏览按钮可见性。"""
         type_key = self._type_reverse_map.get(self.var_task_type.get(), "script")
+        if type_key != "http_get" and hasattr(self, "_http_opts_frame"):
+            self._http_opts_frame.grid_remove()
         if type_key == "http_get":
             self.label_path.config(text=self._lang["label_request_url"])
             self.label_path_hint.config(text=self._lang["hint_request_url"])
@@ -3527,6 +3942,8 @@ class AddEditDialog(tk.Toplevel):
             if hasattr(self, '_check_auto_restart'):
                 self._check_auto_restart.config(state=tk.DISABLED)
                 self.var_auto.set(False)
+            if hasattr(self, "_http_opts_frame"):
+                self._http_opts_frame.grid()
         elif type_key == "process":
             self.label_path.config(text=self._lang["label_process_name"])
             self.label_path_hint.config(text=self._lang["hint_process_name"])
@@ -3736,6 +4153,27 @@ class AddEditDialog(tk.Toplevel):
         if d:
             self.var_work.set(d)
 
+    def _on_fill_local_api(self):
+        """把本机 API 的 base_url / 方法 / X-API-Key 填入当前 HTTP 任务。"""
+        call = resolve_api_call_config()
+        url = rewrite_url_to_local_api(self.var_path.get(), call)
+        self.var_path.set(url)
+        type_key = self._type_reverse_map.get(self.var_task_type.get(), "script")
+        if type_key != "http_get":
+            display = self._type_display_map.get("http_get")
+            if display:
+                self.var_task_type.set(display)
+                self._on_task_type_changed()
+        self.var_http_method.set(api_http_method_for_url(url))
+        auth_on = bool(call.get("auth_enabled"))
+        self.var_http_headers.set(ensure_api_key_header_line(
+            self.var_http_headers.get(),
+            call.get("api_key") or "",
+            auth_on,
+        ))
+        if not (self.var_group.get() or "").strip():
+            self.var_group.set(self._lang.get("group_local_api", "本机API"))
+
     def _on_ok(self):
         try:
             self._do_on_ok()
@@ -3843,6 +4281,8 @@ class AddEditDialog(tk.Toplevel):
             "delay_after_dep": int(self.var_delay_after_dep.get()) if self.var_delay_after_dep.get().strip().isdigit() else 0,
             "args": self.var_args.get().strip(),
             "env_vars": self.var_env_vars.get().strip(),
+            "http_method": normalize_http_method(self.var_http_method.get()) if stype == "http_get" else "GET",
+            "http_headers": self.var_http_headers.get().strip() if stype == "http_get" else "",
             "startup_timeout": int(self.var_startup_timeout.get()) if self.var_startup_timeout.get().strip().isdigit() else 0,
             "schedule_valid_from": self.var_schedule_valid_from.get().strip(),
             "schedule_valid_until": self.var_schedule_valid_until.get().strip(),
@@ -4118,6 +4558,70 @@ class ScheduleOverviewDialog(tk.Toplevel):
         rows.sort(key=lambda r: (str(r[5]), str(r[1])))
         for r in rows:
             self.tree.insert("", tk.END, values=r)
+
+
+# ---------------------------------------------------------------------------
+# GUI：将当前运行中设为启动时自动启动
+# ---------------------------------------------------------------------------
+
+class MarkRunningLaunchOnStartDialog(tk.Toplevel):
+    """确认把当前运行中的任务勾上「启动本工具时自动启动」。"""
+
+    def __init__(self, parent, app, running_items: list):
+        super().__init__(parent)
+        self.app = app
+        self._lang = app._lang
+        self.running_items = running_items
+        self.title(self._lang.get("dialog_mark_running_launch_on_start", "将当前运行中设为启动时自动启动"))
+        self.geometry("520x420")
+        self.minsize(440, 320)
+        self.transient(parent)
+        self.grab_set()
+
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text=self._lang["btn_ok"], command=self._on_ok).pack(side=tk.RIGHT, padx=(10, 0))
+        ttk.Button(btn_frame, text=self._lang["btn_cancel"], command=self.destroy).pack(side=tk.RIGHT)
+
+        body = ttk.Frame(self, padding=10)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            body,
+            text=self._lang.get("label_mark_running_list", "当前运行中的任务（%d 项）：") % len(running_items),
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        list_frame = ttk.Frame(body)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.listbox = tk.Listbox(list_frame, height=10, yscrollcommand=scrollbar.set)
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.listbox.yview)
+        for it in running_items:
+            name = it.get("name", "") or "未命名"
+            self.listbox.insert(tk.END, "#%s  %s  PID=%s" % (it.get("id", ""), name, it.get("pid", "")))
+
+        self.var_clear_stopped = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            body,
+            text=self._lang.get("check_mark_running_clear_stopped", "同时取消未运行任务的「启动时自动启动」"),
+            variable=self.var_clear_stopped,
+        ).pack(anchor=tk.W, pady=(8, 6))
+
+        ttk.Label(
+            body,
+            text=self._lang.get("hint_mark_running", ""),
+            foreground="gray",
+            wraplength=480,
+        ).pack(anchor=tk.W)
+
+    def _on_ok(self):
+        self.app._apply_mark_running_as_launch_on_start(
+            running_ids=[it.get("id") for it in self.running_items],
+            clear_stopped=bool(self.var_clear_stopped.get()),
+        )
+        self.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -4400,6 +4904,11 @@ class BatchEditDialog(tk.Toplevel):
         btn_frame.pack(fill=tk.X, padx=10, pady=(8, 12))
         ttk.Button(btn_frame, text=self._lang["btn_ok"], command=self._on_ok).pack(side=tk.RIGHT, padx=(10, 0))
         ttk.Button(btn_frame, text=self._lang["btn_cancel"], command=self.destroy).pack(side=tk.RIGHT)
+
+    def _get_time_now_plus_1(self):
+        """返回当前时间+1分钟的 HH:MM，供批量编辑快捷填入定时时间。"""
+        t = datetime.now() + timedelta(minutes=1)
+        return t.strftime("%H:%M")
         
     def _on_ok(self):
         """应用批量修改。"""
@@ -4595,7 +5104,7 @@ class BatchManagerApp:
         # 执行历史记录：item_id -> [{"start_time": float, "stop_time": float, "duration": float, "exit_code": int|None, "status": "stopped"|"crashed"}, ...]
         self._execution_history: dict[int, list] = {}
         self._api_server_popen = None  # 本工具启动的 API 进程（独立管理，不在任务列表）
-        self._api_config = {"launch_on_app_start": False}
+        self._api_config = {"launch_on_app_start": False, "call": {}}
         self._api_status_cached_pids: list = []
         self._api_status_last_scan: float = 0.0
         self._load_api_config()
@@ -4665,6 +5174,34 @@ class BatchManagerApp:
         if _is_startup_enabled():
             _set_startup_enabled(True)
 
+    def _on_mark_running_as_launch_on_start(self):
+        """设置 → 将当前运行中的任务勾上「启动本工具时自动启动」。"""
+        running = [it for it in self.items if item_is_currently_running(it)]
+        if not running:
+            messagebox.showinfo(
+                self._lang.get("msg_info", "提示"),
+                self._lang.get("msg_mark_running_none", "当前没有运行中的任务。"),
+                parent=self.root,
+            )
+            return
+        MarkRunningLaunchOnStartDialog(self.root, self, running)
+
+    def _apply_mark_running_as_launch_on_start(self, running_ids=None, clear_stopped: bool = False):
+        result = apply_mark_running_as_launch_on_start(
+            self.items,
+            running_ids=running_ids,
+            clear_stopped=clear_stopped,
+        )
+        self._save_config()
+        self._sync_tree()
+        msg = self._lang.get("status_mark_running_done", "已为 %d 个运行中任务勾选启动时自动启动（新勾选 %d）") % (
+            result.get("running", 0),
+            result.get("enabled", 0),
+        )
+        if result.get("cleared"):
+            msg += self._lang.get("status_mark_running_cleared", "，已取消未运行 %d 项") % result["cleared"]
+        self.status_var.set(msg)
+
     def _on_toggle_close_to_tray(self):
         self._app_config["close_to_tray"] = bool(self._var_close_to_tray.get())
         self._save_app_config()
@@ -4686,62 +5223,101 @@ class BatchManagerApp:
         except Exception:
             pass
 
+    def _enqueue_drop_files(self, files):
+        """拖放回调：只入队，不碰 Tk（可能在非主线程）。"""
+        paths_safe = []
+        try:
+            if files is None:
+                pass
+            elif isinstance(files, (str, bytes)):
+                paths_safe.append(files)
+            else:
+                for f in files:
+                    try:
+                        paths_safe.append(f)
+                    except Exception:
+                        pass
+            out = []
+            for p in paths_safe:
+                try:
+                    if isinstance(p, bytes):
+                        try:
+                            out.append(p.decode("utf-8"))
+                        except Exception:
+                            out.append(p.decode("gbk", errors="replace"))
+                    elif isinstance(p, str):
+                        out.append(p)
+                    else:
+                        out.append(str(p))
+                except Exception:
+                    pass
+            paths_safe = out
+        except Exception:
+            paths_safe = []
+        if not paths_safe:
+            return
+        try:
+            self._drop_queue.put(paths_safe)
+        except Exception:
+            pass
+
+    def _install_native_drop_hook(self) -> bool:
+        """Windows 原生 WM_DROPFILES，打包 exe 不依赖 windnd。挂在 Tk 客户区 HWND 上（与 windnd 相同）。"""
+        if sys.platform != "win32":
+            return False
+        try:
+            import ctypes
+            from ctypes import wintypes
+            self.root.update_idletasks()
+            hwnd = int(self.root.winfo_id())
+            WNDPROC, set_long, get_long, call_proc = _win_user32_wndproc_api()
+
+            def _wndproc(h, msg, wp, lp):
+                try:
+                    if msg == WM_DROPFILES:
+                        paths = _win_hdrop_paths(wp)
+                        if paths:
+                            self._enqueue_drop_files(paths)
+                        return 0
+                except Exception:
+                    pass
+                try:
+                    return call_proc(self._drop_old_wndproc, h, msg, wp, lp)
+                except Exception:
+                    return 0
+
+            self._drop_wndproc_ref = WNDPROC(_wndproc)
+            self._drop_call_proc = call_proc
+            ctypes.windll.shell32.DragAcceptFiles(wintypes.HWND(hwnd), True)
+            self._drop_old_wndproc = get_long(hwnd, GWL_WNDPROC)
+            set_long(hwnd, GWL_WNDPROC, ctypes.cast(self._drop_wndproc_ref, ctypes.c_void_p))
+            self._drop_hwnd = hwnd
+            return True
+        except Exception:
+            return False
+
     def _install_drop_hook(self):
         """延迟注册拖放：窗口已映射后再 hook，且回调内只入队、不碰 Tk。"""
-        if self._drop_hook_installed or not (sys.platform == "win32" and HAS_WINDND):
+        if self._drop_hook_installed or sys.platform != "win32":
             return
         try:
             self.root.update_idletasks()
         except Exception:
             pass
-
-        def on_drop(files):
-            paths_safe = []
-            try:
-                if files is None:
-                    pass
-                elif isinstance(files, (str, bytes)):
-                    paths_safe.append(files)
-                else:
-                    for f in files:
-                        try:
-                            paths_safe.append(f)
-                        except Exception:
-                            pass
-                out = []
-                for p in paths_safe:
-                    try:
-                        if isinstance(p, bytes):
-                            try:
-                                out.append(p.decode("utf-8"))
-                            except Exception:
-                                out.append(p.decode("gbk", errors="replace"))
-                        elif isinstance(p, str):
-                            out.append(p)
-                        else:
-                            out.append(str(p))
-                    except Exception:
-                        pass
-                paths_safe = out
-            except Exception:
-                paths_safe = []
-            if not paths_safe:
-                return
-            try:
-                self._drop_queue.put(paths_safe)
-            except Exception:
-                pass
-
+        if self._install_native_drop_hook():
+            self._drop_hook_installed = True
+            return
+        if not HAS_WINDND:
+            return
         try:
             try:
-                windnd.hook_dropfiles(self.root, func=on_drop, force_unicode=True)
+                windnd.hook_dropfiles(self.root, func=self._enqueue_drop_files, force_unicode=True)
             except TypeError:
-                windnd.hook_dropfiles(self.root, func=on_drop)
+                windnd.hook_dropfiles(self.root, func=self._enqueue_drop_files)
             self._drop_hook_installed = True
         except Exception:
             try:
-                hwnd = self.root.winfo_id()
-                windnd.hook_dropfiles(hwnd, func=on_drop)
+                windnd.hook_dropfiles(self.root.winfo_id(), func=self._enqueue_drop_files)
                 self._drop_hook_installed = True
             except Exception:
                 pass
@@ -4870,14 +5446,19 @@ class BatchManagerApp:
                 label=self._lang.get("menu_minimize_to_tray", "最小化到托盘"),
                 command=self._on_minimize_to_tray_menu,
             )
+        self._settings_menu.add_command(
+            label=self._lang.get("menu_mark_running_launch_on_start", "将当前运行中设为启动时自动启动"),
+            command=self._on_mark_running_as_launch_on_start,
+        )
+        self._mark_running_menu_index = int(self._settings_menu.index("end"))
         self._settings_menu.add_separator()
         self._settings_menu.add_command(label=self._lang.get("menu_schedule_resume" if self._schedule_paused else "menu_schedule_pause"), command=self._on_toggle_schedule_pause)
+        self._schedule_pause_menu_index = int(self._settings_menu.index("end"))
         self._settings_menu.add_separator()
         self._settings_menu.add_command(label=self._lang.get("menu_restore_bak", "从上次备份恢复配置"), command=self._on_restore_config_bak)
         self._settings_menu.add_command(label=self._lang.get("menu_global_hotkeys", "快捷键说明"), command=self._on_show_hotkeys)
         self._settings_menu.add_separator()
         self._settings_menu.add_command(label=self._lang.get("menu_about", "关于"), command=self._on_about)
-        self._schedule_pause_menu_index = 4 if HAS_TRAY else 3
         
         # 开机/登录自启：Windows 注册表；Mac launchd；Linux systemd user
         self._startup_var = tk.BooleanVar(value=_is_startup_enabled())
@@ -4958,6 +5539,8 @@ class BatchManagerApp:
             self.btn_stop_all_batch.pack(side=tk.LEFT, padx=2)
         else:
             self.btn_stop_all_batch = None
+        self.btn_open_tool_folder = ttk.Button(row1b, text=self._lang["btn_open_tool_folder"], command=self._on_open_tool_folder)
+        self.btn_open_tool_folder.pack(side=tk.LEFT, padx=2)
         # API 服务（独立管理，默认 WindowsBatchScriptManager_api_server.py，不加入任务列表）
         row_api = ttk.Frame(ops_block)
         row_api.pack(fill=tk.X, pady=(0, 3))
@@ -4969,6 +5552,8 @@ class BatchManagerApp:
         self.btn_stop_api.pack(side=tk.LEFT, padx=2)
         self.btn_restart_api = ttk.Button(row_api, text=self._lang["btn_restart_api"], command=self._on_restart_api)
         self.btn_restart_api.pack(side=tk.LEFT, padx=2)
+        self.btn_load_api_calls = ttk.Button(row_api, text=self._lang["btn_load_api_calls"], command=self._on_load_api_call_tasks)
+        self.btn_load_api_calls.pack(side=tk.LEFT, padx=2)
         ttk.Separator(row_api, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
         self.var_api_launch_on_start = tk.BooleanVar(value=bool(self._api_config.get("launch_on_app_start", False)))
         self.check_api_launch_on_start = ttk.Checkbutton(
@@ -4980,7 +5565,7 @@ class BatchManagerApp:
         self.check_api_launch_on_start.pack(side=tk.LEFT, padx=2)
         self.label_api_status = ttk.Label(row_api, text="", font=("", 9), foreground="gray")
         self.label_api_status.pack(side=tk.LEFT, padx=(8, 0))
-        # 第二行：自动识别、识别并加入、刷新状态、端口/进程
+        # 第二行：自动识别、识别并加入、刷新状态、端口/进程、访问 | 关闭系统 重启系统
         row2 = ttk.Frame(ops_block)
         row2.pack(fill=tk.X, pady=(0, 3))
         self.btn_scan_running = ttk.Button(row2, text=self._lang["btn_scan_running"], command=self._on_scan_running)
@@ -4999,8 +5584,17 @@ class BatchManagerApp:
         self.btn_ports.pack(side=tk.LEFT, padx=2)
         self.btn_visit = ttk.Button(row2, text=self._lang["btn_visit"], command=self._on_visit_port)
         self.btn_visit.pack(side=tk.LEFT, padx=2)
+        if sys.platform == "win32":
+            ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            self.btn_shutdown = ttk.Button(row2, text=self._lang["btn_shutdown"], command=self._on_system_shutdown)
+            self.btn_shutdown.pack(side=tk.LEFT, padx=2)
+            self.btn_reboot = ttk.Button(row2, text=self._lang["btn_reboot"], command=self._on_system_reboot)
+            self.btn_reboot.pack(side=tk.LEFT, padx=2)
+        else:
+            self.btn_shutdown = None
+            self.btn_reboot = None
         
-        # 第三行：管理功能
+        # 第三行：管理功能 … 通知配置 | 实时日志 重启工具
         row3 = ttk.Frame(ops_block)
         row3.pack(fill=tk.X, pady=(0, 2))
         self.btn_export = ttk.Button(row3, text=self._lang["btn_export"], command=self._on_export_config)
@@ -5021,17 +5615,8 @@ class BatchManagerApp:
         ttk.Separator(row3, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
         self.btn_tail_log = ttk.Button(row3, text=self._lang["btn_tail_log"], command=self._on_tail_log)
         self.btn_tail_log.pack(side=tk.LEFT, padx=2)
-        ttk.Separator(row3, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
         self.btn_restart_self = ttk.Button(row3, text=self._lang["btn_restart_self"], command=self._on_restart_self)
         self.btn_restart_self.pack(side=tk.LEFT, padx=2)
-        if sys.platform == "win32":
-            self.btn_shutdown = ttk.Button(row3, text=self._lang["btn_shutdown"], command=self._on_system_shutdown)
-            self.btn_shutdown.pack(side=tk.LEFT, padx=2)
-            self.btn_reboot = ttk.Button(row3, text=self._lang["btn_reboot"], command=self._on_system_reboot)
-            self.btn_reboot.pack(side=tk.LEFT, padx=2)
-        else:
-            self.btn_shutdown = None
-            self.btn_reboot = None
 
 
         # 外网 / 本地 IP 同一行、整体靠左排列
@@ -5114,14 +5699,20 @@ class BatchManagerApp:
         self.btn_clear_filter = ttk.Button(filter_frame, text=self._lang["btn_clear_filter"], command=self._clear_group_filter)
         self.btn_clear_filter.pack(side=tk.LEFT, padx=2)
         
-        # 搜索关键词与定位
+        # 搜索关键词：输入即过滤列表（名称/路径/工作目录/分组），定位/下一个仍可在结果中跳转
         ttk.Separator(filter_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
         self.label_search_keyword = ttk.Label(filter_frame, text=self._lang["label_search_keyword"])
         self.label_search_keyword.pack(side=tk.LEFT, padx=(0, 4))
         self.search_keyword_var = tk.StringVar()
-        self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_keyword_var, width=18)
+        self._search_filter_after_id = None
+        self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_keyword_var, width=24)
         self.search_entry.pack(side=tk.LEFT, padx=2)
         self.search_entry.bind("<Return>", lambda e: self._on_search_locate(forward=True))
+        self.search_entry.bind("<Escape>", self._on_search_escape)
+        self.search_keyword_var.trace_add("write", self._on_search_keyword_changed)
+        self.search_tooltip = ToolTip(self.search_entry, self._lang["hint_search_keyword"])
+        self.search_match_label = ttk.Label(filter_frame, text="", foreground="gray")
+        self.search_match_label.pack(side=tk.LEFT, padx=(4, 2))
         self.btn_locate = ttk.Button(filter_frame, text=self._lang["btn_locate"], command=lambda: self._on_search_locate(forward=True))
         self.btn_locate.pack(side=tk.LEFT, padx=2)
         self.btn_next_match = ttk.Button(filter_frame, text=self._lang["btn_next_match"], command=lambda: self._on_search_locate(forward=False))
@@ -5198,6 +5789,7 @@ class BatchManagerApp:
         self.root.bind("<F5>", lambda e: self._refresh_status(and_set_status=True))
         self.root.bind("<F6>", lambda e: self._on_start_all())
         self.root.bind("<F7>", lambda e: self._on_stop_all())
+        self.root.bind("<Control-f>", lambda e: self._focus_search())
         # Alt+Up/Down：移动选中行上下排序
         self.tree.bind("<Alt-Up>", lambda e: self._on_move_row(-1))
         self.tree.bind("<Alt-Down>", lambda e: self._on_move_row(1))
@@ -5215,8 +5807,14 @@ class BatchManagerApp:
         self.root.bind("<Control-a>", lambda e: (self._on_select_all(), "break")[1])
 
     def _get_selected_rows(self) -> list:
-        sel = self.tree.selection()
-        rows = [self.tree.index(i) for i in sel]
+        """返回选中项在 self.items 中的索引。按任务 id 映射，与分组/关键词筛选无关。"""
+        rows = []
+        seen = set()
+        for iid in self.tree.selection():
+            idx = self._item_index_from_tree_iid(iid)
+            if idx is not None and idx not in seen:
+                seen.add(idx)
+                rows.append(idx)
         # 无选中且仅有 1 项时，自动视作选中该项，避免重启/停止/编辑等总是弹出「请先选中」
         if not rows and len(self.items) == 1:
             return [0]
@@ -5268,8 +5866,8 @@ class BatchManagerApp:
             self.detail_text.config(state=tk.DISABLED)
             self._update_visit_button_state()
             return
-        idx = self.tree.index(sel[0])
-        it = self._item_at(idx)
+        rows = self._get_selected_rows()
+        it = self._item_at(rows[0]) if rows else None
         if it:
             if self._current_language == "zh_CN":
                 s = f"路径: {it.get('path','')}\n工作目录: {it.get('work_dir','') or '(同脚本目录)'}"
@@ -5303,6 +5901,8 @@ class BatchManagerApp:
         if isinstance(saved, dict):
             if "launch_on_app_start" in saved:
                 self._api_config["launch_on_app_start"] = bool(saved["launch_on_app_start"])
+            if isinstance(saved.get("call"), dict):
+                self._api_config["call"] = saved["call"]
 
     def _save_api_config(self) -> bool:
         return save_api_config(self._api_config)
@@ -5310,6 +5910,27 @@ class BatchManagerApp:
     def _on_api_config_changed(self):
         self._api_config["launch_on_app_start"] = bool(self.var_api_launch_on_start.get())
         self._save_api_config()
+
+    def _current_lan_ip(self) -> str:
+        try:
+            t = (self.ip_label.cget("text") or "").strip()
+            if _looks_like_ipv4(t):
+                return t
+        except Exception:
+            pass
+        got = get_local_ip()
+        return got if _looks_like_ipv4(got) else "127.0.0.1"
+
+    def _persist_api_call_config(self) -> dict:
+        cfg = build_api_call_config(self._current_lan_ip())
+        self._api_config["call"] = cfg
+        self._save_api_config()
+        return cfg
+
+    def _set_api_call_status_hint(self, call: Optional[dict] = None):
+        cfg = call or self._api_config.get("call") or build_api_call_config(self._current_lan_ip())
+        docs = cfg.get("docs_url") or ((cfg.get("base_url") or "") + "/")
+        self.status_var.set(self._lang["status_api_call_hint"] % docs)
 
     def _load_notification_config(self):
         """加载通知配置。"""
@@ -5370,8 +5991,11 @@ class BatchManagerApp:
         self.btn_batch_edit.config(text=self._lang["btn_batch_edit"])
         self.btn_clear_invalid.config(text=self._lang["btn_clear_invalid"])
         self.btn_notification.config(text=self._lang["btn_notification"])
+        if getattr(self, "btn_tail_log", None):
+            self.btn_tail_log.config(text=self._lang["btn_tail_log"])
         if getattr(self, "btn_stop_all_batch", None):
             self.btn_stop_all_batch.config(text=self._lang["btn_stop_all_batch"])
+        self.btn_open_tool_folder.config(text=self._lang["btn_open_tool_folder"])
         if getattr(self, "btn_restart_self", None):
             self.btn_restart_self.config(text=self._lang["btn_restart_self"])
         if getattr(self, "btn_shutdown", None):
@@ -5386,6 +6010,8 @@ class BatchManagerApp:
             self.btn_stop_api.config(text=self._lang["btn_stop_api"])
         if getattr(self, "btn_restart_api", None):
             self.btn_restart_api.config(text=self._lang["btn_restart_api"])
+        if getattr(self, "btn_load_api_calls", None):
+            self.btn_load_api_calls.config(text=self._lang["btn_load_api_calls"])
         if getattr(self, "check_api_launch_on_start", None):
             self.check_api_launch_on_start.config(text=self._lang["check_launch_api_on_start"])
         self._update_api_status_label()
@@ -5396,6 +6022,9 @@ class BatchManagerApp:
         self.label_search_keyword.config(text=self._lang["label_search_keyword"])
         self.btn_locate.config(text=self._lang["btn_locate"])
         self.btn_next_match.config(text=self._lang["btn_next_match"])
+        if getattr(self, "search_tooltip", None):
+            self.search_tooltip.text = self._lang["hint_search_keyword"]
+        self._update_search_match_label(update_status=False)
         # 更新IP标签
         self.label_local_ip.config(text=self._lang["label_local_ip"])
         self.label_public_ip.config(text=self._lang["label_public_ip"])
@@ -5466,6 +6095,11 @@ class BatchManagerApp:
                                 self._settings_menu.entryconfig(
                                     self._start_minimized_menu_index,
                                     label=self._lang.get("menu_start_minimized", "启动后最小化到任务栏"),
+                                )
+                            if getattr(self, "_mark_running_menu_index", None) is not None:
+                                self._settings_menu.entryconfig(
+                                    self._mark_running_menu_index,
+                                    label=self._lang.get("menu_mark_running_launch_on_start", "将当前运行中设为启动时自动启动"),
                                 )
                             if getattr(self, "_schedule_pause_menu_index", None) is not None:
                                 self._settings_menu.entryconfig(self._schedule_pause_menu_index, label=self._lang.get("menu_schedule_resume" if self._schedule_paused else "menu_schedule_pause"))
@@ -5689,6 +6323,8 @@ class BatchManagerApp:
                 "delay_after_dep": r.get("delay_after_dep", 0),
                 "args": r.get("args", ""),
                 "env_vars": r.get("env_vars", ""),
+                "http_method": r.get("http_method") or "GET",
+                "http_headers": r.get("http_headers") or "",
                 "startup_timeout": r.get("startup_timeout", 0),
                 "schedule_valid_from": r.get("schedule_valid_from", ""),
                 "schedule_valid_until": r.get("schedule_valid_until", ""),
@@ -5880,25 +6516,131 @@ class BatchManagerApp:
             args_s,
         ), group
 
-    def _sync_tree(self, force_rebuild=False):
-        """增量更新树形视图，仅更新变化的行。force_rebuild=True 时全量重建。"""
-        # 刷新前记下当前选中行的行号
-        try:
-            sel = self.tree.selection()
-            saved = sorted(set(self.tree.index(i) for i in sel))
-        except Exception:
-            saved = []
+    def _search_keywords(self) -> list:
+        """拆分搜索框中的关键词（空格分隔，忽略大小写）。"""
+        raw = (self.search_keyword_var.get() or "").strip().lower()
+        if not raw:
+            return []
+        return [p for p in raw.split() if p]
 
-        # 计算可见行的新值
-        visible_items = []
-        for it in self.items:
-            vals, group = self._compute_row_values(it)
+    def _item_matches_keywords(self, it: dict, keywords: list) -> bool:
+        """用完整路径/名称等字段匹配，避免表格截断导致漏搜。"""
+        if not keywords:
+            return True
+        haystack = " ".join([
+            str(it.get("id", "")),
+            it.get("name", "") or "",
+            it.get("group", "") or "",
+            it.get("path", "") or "",
+            it.get("work_dir", "") or "",
+        ]).lower()
+        return all(kw in haystack for kw in keywords)
+
+    def _iter_visible_items(self):
+        """按当前分组折叠、分组筛选、关键词过滤，产出 (items索引, item)。"""
+        keywords = self._search_keywords()
+        filter_group = self.filter_group_var.get()
+        all_text = "全部" if self._current_language == "zh_CN" else "All"
+        for i, it in enumerate(self.items):
+            group = it.get("group", "") or "-"
             if group != "-" and group in self._collapsed_groups:
                 continue
-            filter_group = self.filter_group_var.get()
-            all_text = "全部" if self._current_language == "zh_CN" else "All"
             if filter_group and filter_group != all_text and group != filter_group:
                 continue
+            if keywords and not self._item_matches_keywords(it, keywords):
+                continue
+            yield i, it
+
+    def _item_id_from_tree_iid(self, iid):
+        try:
+            vals = self.tree.item(iid, "values")
+            if vals:
+                return int(vals[0])
+        except (ValueError, TypeError, tk.TclError):
+            return None
+        return None
+
+    def _item_index_by_id(self, item_id):
+        for i, it in enumerate(self.items):
+            if it.get("id") == item_id:
+                return i
+        return None
+
+    def _item_index_from_tree_iid(self, iid):
+        item_id = self._item_id_from_tree_iid(iid)
+        if item_id is None:
+            return None
+        return self._item_index_by_id(item_id)
+
+    def _on_search_keyword_changed(self, *_args):
+        after_id = getattr(self, "_search_filter_after_id", None)
+        if after_id:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+        self._search_filter_after_id = self.root.after(120, self._apply_search_filter)
+
+    def _apply_search_filter(self):
+        self._search_filter_after_id = None
+        self._sync_tree()
+        self._update_search_match_label(update_status=True)
+
+    def _on_search_escape(self, event=None):
+        if (self.search_keyword_var.get() or "").strip():
+            self.search_keyword_var.set("")
+            return "break"
+        return None
+
+    def _focus_search(self):
+        self.search_entry.focus_set()
+        self.search_entry.selection_range(0, tk.END)
+        return "break"
+
+    def _update_search_match_label(self, update_status: bool = False):
+        if not getattr(self, "search_match_label", None):
+            return
+        keywords = self._search_keywords()
+        if not keywords:
+            self.search_match_label.config(text="")
+            return
+        scoped = 0
+        matched = 0
+        filter_group = self.filter_group_var.get()
+        all_text = "全部" if self._current_language == "zh_CN" else "All"
+        for it in self.items:
+            group = it.get("group", "") or "-"
+            if group != "-" and group in self._collapsed_groups:
+                continue
+            if filter_group and filter_group != all_text and group != filter_group:
+                continue
+            scoped += 1
+            if self._item_matches_keywords(it, keywords):
+                matched += 1
+        text = self._lang["msg_search_filtered"] % (matched, scoped)
+        self.search_match_label.config(text=text)
+        if update_status:
+            raw = (self.search_keyword_var.get() or "").strip()
+            if matched == 0:
+                self.status_var.set(self._lang["msg_search_no_match"] % raw)
+            else:
+                self.status_var.set(text)
+
+    def _sync_tree(self, force_rebuild=False):
+        """增量更新树形视图，仅更新变化的行。force_rebuild=True 时全量重建。"""
+        # 刷新前记下当前选中项的任务 id（筛选后行号会变）
+        saved_ids = []
+        try:
+            for iid in self.tree.selection():
+                item_id = self._item_id_from_tree_iid(iid)
+                if item_id is not None:
+                    saved_ids.append(item_id)
+        except Exception:
+            saved_ids = []
+
+        visible_items = []
+        for _i, it in self._iter_visible_items():
+            vals, _group = self._compute_row_values(it)
             visible_items.append(vals)
 
         children = self.tree.get_children()
@@ -5921,17 +6663,24 @@ class BatchManagerApp:
                     self.tree.item(child, values=new_vals)
 
         children = self.tree.get_children()
-        to_sel = [children[i] for i in saved if 0 <= i < len(children)]
+        to_sel = []
+        saved_set = set(saved_ids)
+        for child in children:
+            item_id = self._item_id_from_tree_iid(child)
+            if item_id in saved_set:
+                to_sel.append(child)
         if to_sel:
             self.tree.selection_set(*to_sel)
             self.tree.see(to_sel[0])
+        elif self._search_keywords() and children:
+            self.tree.see(children[0])
         elif children:
             self.tree.see(children[-1])
         self._update_visit_button_state()
-        # 分组过滤选项仅在行数变化时才更新，避免每4秒重建combobox
-        children_now = self.tree.get_children()
-        if not hasattr(self, '_last_group_count') or len(children_now) != self._last_group_count:
-            self._last_group_count = len(children_now)
+        self._update_search_match_label(update_status=False)
+        # 分组选项随任务总数变化更新，避免关键词过滤时反复重建 combobox
+        if not hasattr(self, '_last_group_count') or len(self.items) != self._last_group_count:
+            self._last_group_count = len(self.items)
             self._update_group_filter_options()
 
     def _update_group_filter_options(self):
@@ -5948,24 +6697,15 @@ class BatchManagerApp:
             self.filter_group_var.set(all_text)
 
     def _on_search_locate(self, forward: bool = True):
-        """按关键词在列表中搜索并定位。forward=True 为首次定位，False 为下一个匹配。"""
+        """在当前可见列表中定位。列表已按关键词过滤时，相当于在匹配结果间跳转。"""
         keyword = (self.search_keyword_var.get() or "").strip()
         if not keyword:
+            self.search_entry.focus_set()
             return
         children = list(self.tree.get_children())
         if not children:
             self.status_var.set(self._lang["msg_search_no_match"] % keyword)
             return
-        kw_lower = keyword.lower()
-        # 表格列顺序: id, name, group, path, work_dir, type, status, schedule, title, ports, pid
-        def row_matches(iid):
-            vals = self.tree.item(iid, "values")
-            if not vals or len(vals) < 5:
-                return False
-            for i in range(5):
-                if kw_lower in (str(vals[i]) or "").lower():
-                    return True
-            return False
         start_index = 0
         if not forward:
             sel = self.tree.selection()
@@ -5975,26 +6715,25 @@ class BatchManagerApp:
                     start_index = (idx + 1) % len(children)
                 except ValueError:
                     pass
-        for i in range(len(children)):
-            pos = (start_index + i) % len(children)
-            iid = children[pos]
-            if row_matches(iid):
-                self.tree.selection_set(iid)
-                self.tree.focus(iid)
-                self.tree.see(iid)
-                self.status_var.set(self._lang["msg_search_located"] % (pos + 1))
-                return
-        self.status_var.set(self._lang["msg_search_no_match"] % keyword)
+        pos = start_index
+        iid = children[pos]
+        self.tree.selection_set(iid)
+        self.tree.focus(iid)
+        self.tree.see(iid)
+        self.status_var.set(self._lang["msg_search_located"] % (pos + 1))
 
     def _apply_group_filter(self):
         """应用分组筛选。"""
         self._sync_tree()
 
     def _clear_group_filter(self):
-        """清除分组筛选。"""
+        """清除分组筛选与关键词过滤。"""
         all_text = "全部" if self._current_language == "zh_CN" else "All"
         self.filter_group_var.set(all_text)
-        self._sync_tree()
+        if (self.search_keyword_var.get() or "").strip():
+            self.search_keyword_var.set("")
+        else:
+            self._sync_tree()
 
     def _fetch_port_title_thread(self, port: int):
         """在后台线程中获取端口页面标题，成功后通过 root.after 更新表格（线程安全）。"""
@@ -6024,19 +6763,23 @@ class BatchManagerApp:
             if not target or target == self._drag_start_item:
                 return
             try:
-                src_idx = self.tree.index(self._drag_start_item)
-                tgt_idx = self.tree.index(target)
+                src_idx = self._item_index_from_tree_iid(self._drag_start_item)
+                tgt_idx = self._item_index_from_tree_iid(target)
             except (ValueError, tk.TclError):
                 return
-            if src_idx != tgt_idx and src_idx < len(self.items) and tgt_idx < len(self.items):
-                # 移动 items 列表中的数据
+            if src_idx is None or tgt_idx is None:
+                return
+            if src_idx != tgt_idx:
                 moved = self.items.pop(src_idx)
+                if src_idx < tgt_idx:
+                    tgt_idx -= 1
                 self.items.insert(tgt_idx, moved)
                 self._sync_tree(force_rebuild=True)
-                # 重新选中移动的行
-                children = self.tree.get_children()
-                if tgt_idx < len(children):
-                    self.tree.selection_set(children[tgt_idx])
+                moved_id = moved.get("id")
+                for child in self.tree.get_children():
+                    if self._item_id_from_tree_iid(child) == moved_id:
+                        self.tree.selection_set(child)
+                        break
             self._drag_in_progress = True
             return
         # 普通拖拽：多选模式
@@ -6082,29 +6825,31 @@ class BatchManagerApp:
         self._drag_start_item = None
 
     def _on_move_row(self, direction: int):
-        """Alt+Up/Down 移动选中行的顺序。direction=-1 上移，+1 下移。"""
-        sel = self.tree.selection()
-        if not sel:
+        """Alt+Up/Down 移动选中行的顺序。direction=-1 上移，+1 下移。筛选时与相邻可见项交换。"""
+        rows = self._get_selected_rows()
+        if not rows:
             return
-        # 取选中的第一个行的索引
+        idx = rows[0]
+        visible_indices = [i for i, _it in self._iter_visible_items()]
         try:
-            idx = self.tree.index(sel[0])
-        except (ValueError, tk.TclError):
+            pos = visible_indices.index(idx)
+        except ValueError:
             return
-        new_idx = idx + direction
-        if new_idx < 0 or new_idx >= len(self.items):
+        new_pos = pos + direction
+        if new_pos < 0 or new_pos >= len(visible_indices):
             return
-        # 交换 items 列表中的位置
-        self.items[idx], self.items[new_idx] = self.items[new_idx], self.items[idx]
+        other = visible_indices[new_pos]
+        self.items[idx], self.items[other] = self.items[other], self.items[idx]
         self._sync_tree(force_rebuild=True)
         self._save_config()
-        # 重新选中移动后的行
-        children = self.tree.get_children()
-        if new_idx < len(children):
-            self.tree.selection_set(children[new_idx])
-            self.tree.focus(children[new_idx])
-            self.tree.see(children[new_idx])
-        return "break"  # 阻止默认行为
+        moved_id = self.items[other].get("id")
+        for child in self.tree.get_children():
+            if self._item_id_from_tree_iid(child) == moved_id:
+                self.tree.selection_set(child)
+                self.tree.focus(child)
+                self.tree.see(child)
+                break
+        return "break"
 
     def _on_tree_right_click(self, event):
         """右键菜单：若点击在某行上则先选中该行，再弹出 启动/停止/重启/编辑/删除/复制/全选/取消全选/端口进程。"""
@@ -6401,8 +7146,9 @@ class BatchManagerApp:
 
     def _apply_api_start_result(self, p, set_status: bool = True):
         self._api_server_popen = p
+        call = self._persist_api_call_config()
         if set_status:
-            self.status_var.set(self._lang["msg_api_started"] % p.pid)
+            self._set_api_call_status_hint(call)
         self._update_api_status_label(force_scan=True)
 
     def _do_launch_api_on_start(self):
@@ -6410,14 +7156,12 @@ class BatchManagerApp:
         if not self._api_config.get("launch_on_app_start"):
             return
         if find_api_server_pids(self._api_server_popen):
+            self._persist_api_call_config()
             self._update_api_status_label()
             return
         path = get_api_server_script_path()
         if not path or not os.path.isfile(path):
             self.status_var.set(self._lang["status_api_missing"])
-            return
-        if not api_server_deps_available():
-            self.status_var.set(self._lang["msg_api_deps_missing"].split("\n")[0])
             return
 
         def run_in_thread():
@@ -6432,12 +7176,10 @@ class BatchManagerApp:
         if not path or not os.path.isfile(path):
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_not_found"] % (path or API_SERVER_SCRIPT_NAME))
             return
-        if not api_server_deps_available():
-            messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_deps_missing"])
-            return
         pids = find_api_server_pids(self._api_server_popen)
         if pids:
-            self.status_var.set(self._lang["msg_api_already_running"] % pids[0])
+            call = self._persist_api_call_config()
+            self._set_api_call_status_hint(call)
             self._update_api_status_label(force_scan=True)
             return
         p = start_api_server()
@@ -6446,7 +7188,8 @@ class BatchManagerApp:
             self._update_api_status_label(force_scan=True)
             return
         self._api_server_popen = p
-        self.status_var.set(self._lang["msg_api_started"] % p.pid)
+        call = self._persist_api_call_config()
+        self._set_api_call_status_hint(call)
         self._update_api_status_label(force_scan=True)
 
     def _on_stop_api(self):
@@ -6471,9 +7214,6 @@ class BatchManagerApp:
         if not path or not os.path.isfile(path):
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_not_found"] % (path or API_SERVER_SCRIPT_NAME))
             return
-        if not api_server_deps_available():
-            messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_deps_missing"])
-            return
         stop_api_server_processes(self._api_server_popen)
         self._api_server_popen = None
         time.sleep(0.5)
@@ -6483,8 +7223,120 @@ class BatchManagerApp:
             self._update_api_status_label(force_scan=True)
             return
         self._api_server_popen = p
-        self.status_var.set(self._lang["msg_api_restarted"] % p.pid)
+        call = self._persist_api_call_config()
+        self._set_api_call_status_hint(call)
         self._update_api_status_label(force_scan=True)
+
+    def _find_existing_api_http_task(self, method: str, url: str, group_names: tuple):
+        target = _http_endpoint_key(url, method)
+        target_parsed = urllib.parse.urlparse(url)
+        matches = []
+        for it in self.items:
+            if not _is_http_task_item(it):
+                continue
+            if _http_endpoint_key(it.get("path"), it.get("http_method")) != target:
+                continue
+            matches.append(it)
+        for it in matches:
+            if (it.get("group") or "") in group_names:
+                return it
+        for it in matches:
+            if (it.get("path") or "").rstrip("/") == (url or "").rstrip("/"):
+                return it
+        for it in matches:
+            p = urllib.parse.urlparse(it.get("path") or "")
+            if p.hostname == target_parsed.hostname and p.port == target_parsed.port:
+                return it
+        for it in matches:
+            p = urllib.parse.urlparse(it.get("path") or "")
+            if p.port == target_parsed.port:
+                return it
+        path_q = (target[1], target[2])
+        for it in self.items:
+            if not _is_http_task_item(it):
+                continue
+            if (it.get("group") or "") not in group_names:
+                continue
+            k = _http_endpoint_key(it.get("path"), it.get("http_method"))
+            if (k[1], k[2]) == path_q:
+                return it
+        return None
+
+    def _make_local_api_http_item(self, item_id: int, name: str, url: str, method: str, headers: str, group: str) -> dict:
+        return {
+            "id": item_id,
+            "name": name,
+            "path": url,
+            "work_dir": "",
+            "group": group,
+            "script_type": "http_get",
+            "interpreter": "",
+            "is_python": False,
+            "python_exe": "",
+            "auto_restart": False,
+            "launch_on_app_start": False,
+            "log_output": False,
+            "schedule_enabled": False,
+            "schedule_action": "start",
+            "schedule_type": "daily",
+            "schedule_time": "09:00",
+            "schedule_interval": 5,
+            "schedule_weekday": 0,
+            "schedule_day": 1,
+            "schedule_quarter": "q1",
+            "schedule_month": 1,
+            "depends_on": "",
+            "delay_after_dep": 0,
+            "args": "",
+            "env_vars": "",
+            "http_method": method,
+            "http_headers": headers,
+            "startup_timeout": 0,
+            "schedule_valid_from": "",
+            "schedule_valid_until": "",
+            "schedule_max_runs": 0,
+            "schedule_pre_delay": 0,
+            "schedule_once_date": "",
+            "pid": None,
+        }
+
+    def _on_load_api_call_tasks(self):
+        """一键写入/更新「本机API」分组下的 HTTP 调用任务，不重复添加相同 URL+方法。"""
+        call = resolve_api_call_config(self._current_lan_ip())
+        self._api_config["call"] = call
+        self._save_api_config()
+        base = (call.get("base_url") or "").rstrip("/")
+        if not base:
+            messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_start_failed"])
+            return
+        group = self._lang.get("group_local_api", "本机API")
+        group_names = tuple(dict.fromkeys(LOCAL_API_GROUP_NAMES + (group,)))
+        auth_on = bool(call.get("auth_enabled"))
+        headers = format_api_key_headers(call.get("api_key") or "", auth_on)
+        added = 0
+        updated = 0
+        for name_key, method, path in API_CALL_TASK_PRESETS:
+            url = base + path
+            method = normalize_http_method(method)
+            name = self._lang.get(name_key, path)
+            existing = self._find_existing_api_http_task(method, url, group_names)
+            if existing:
+                existing["path"] = url
+                existing["http_method"] = method
+                existing["http_headers"] = headers
+                existing["script_type"] = "http_get"
+                existing["auto_restart"] = False
+                existing["group"] = group
+                updated += 1
+            else:
+                nid = next_item_id(self.items)
+                self.items.append(self._make_local_api_http_item(nid, name, url, method, headers, group))
+                self._next_id = max(getattr(self, "_next_id", 1), nid + 1)
+                added += 1
+        self._save_config()
+        self._sync_tree()
+        messagebox.showinfo(self._lang["msg_info"], self._lang["msg_api_calls_loaded"] % (added, updated))
+        self._set_api_call_status_hint(call)
 
     def _check_config_changed(self):
         """检测脚本列表配置是否被外部修改（HTTP API / CLI），自动重载并保留运行状态。"""
@@ -7351,6 +8203,8 @@ class BatchManagerApp:
                             detach_on_windows=True,
                             extra_args=extra_args,
                             env_vars=env_vars,
+                            http_method=it.get("http_method"),
+                            http_headers=it.get("http_headers"),
                         )
                         if p:
                             break
@@ -7460,6 +8314,8 @@ class BatchManagerApp:
             "delay_after_dep": r.get("delay_after_dep", 0),
             "args": r.get("args", ""),
             "env_vars": r.get("env_vars", ""),
+            "http_method": r.get("http_method") or "GET",
+            "http_headers": r.get("http_headers") or "",
             "startup_timeout": r.get("startup_timeout", 0),
             "schedule_valid_from": r.get("schedule_valid_from", ""),
             "schedule_valid_until": r.get("schedule_valid_until", ""),
@@ -7571,6 +8427,8 @@ class BatchManagerApp:
             "delay_after_dep": r.get("delay_after_dep", 0),
             "args": r.get("args", ""),
             "env_vars": r.get("env_vars", ""),
+            "http_method": r.get("http_method") or "GET",
+            "http_headers": r.get("http_headers") or "",
             "startup_timeout": r.get("startup_timeout", 0),
             "schedule_valid_from": r.get("schedule_valid_from", ""),
             "schedule_valid_until": r.get("schedule_valid_until", ""),
@@ -7627,6 +8485,8 @@ class BatchManagerApp:
             "delay_after_dep": it.get("delay_after_dep", 0),
             "args": it.get("args", ""),
             "env_vars": it.get("env_vars", ""),
+            "http_method": it.get("http_method") or "GET",
+            "http_headers": it.get("http_headers") or "",
             "startup_timeout": it.get("startup_timeout", 0),
             "schedule_valid_from": it.get("schedule_valid_from", ""),
             "schedule_valid_until": it.get("schedule_valid_until", ""),
@@ -7676,6 +8536,8 @@ class BatchManagerApp:
         it["delay_after_dep"] = r.get("delay_after_dep", 0)
         it["args"] = r.get("args", "")
         it["env_vars"] = r.get("env_vars", "")
+        it["http_method"] = r.get("http_method") or "GET"
+        it["http_headers"] = r.get("http_headers") or ""
         it["startup_timeout"] = r.get("startup_timeout", 0)
         it["schedule_valid_from"] = r.get("schedule_valid_from", "")
         it["schedule_valid_until"] = r.get("schedule_valid_until", "")
@@ -7831,6 +8693,8 @@ class BatchManagerApp:
             log_path=logpath,
             extra_args=extra_args,
             env_vars=env_vars,
+            http_method=it.get("http_method"),
+            http_headers=it.get("http_headers"),
         )
         if p:
             it["pid"] = p.pid
@@ -8009,7 +8873,7 @@ class BatchManagerApp:
                 if pid and is_process_running(pid):
                     self._restart_pids_to_wait.append(pid)
         self._on_stop()  # 会 _sync_tree 并清空选中
-        self._restart_rows = rows
+        self._restart_ids = [self.items[r].get("id") for r in rows if 0 <= r < len(self.items)]
         self._restart_wait_start = time.time()
         self._restart_wait_phase()
 
@@ -8023,9 +8887,8 @@ class BatchManagerApp:
             self.root.after(100, self._restart_wait_phase)
             return
         # 所有进程已退出或超时，执行启动
-        rows = self._restart_rows
-        children = self.tree.get_children()
-        to_sel = [children[r] for r in rows if 0 <= r < len(children)]
+        id_set = set(getattr(self, "_restart_ids", []) or [])
+        to_sel = [child for child in self.tree.get_children() if self._item_id_from_tree_iid(child) in id_set]
         if to_sel:
             self.tree.selection_set(*to_sel)
         self._on_start()
@@ -8329,6 +9192,8 @@ class BatchManagerApp:
                 "delay_after_dep": it.get("delay_after_dep", 0),
                 "args": it.get("args", ""),
                 "env_vars": it.get("env_vars", ""),
+                "http_method": it.get("http_method") or "GET",
+                "http_headers": it.get("http_headers") or "",
                 "startup_timeout": it.get("startup_timeout", 0),
                 "schedule_valid_from": it.get("schedule_valid_from", ""),
                 "schedule_valid_until": it.get("schedule_valid_until", ""),
@@ -8341,6 +9206,18 @@ class BatchManagerApp:
         self._sync_tree()
         self.status_var.set(self._lang["msg_copied"] % len(rows))
 
+    def _ports_from_cache(self, pid: int) -> list:
+        """用刷新时的 pid→端口缓存，避免点选时再调 net_connections。"""
+        cached = getattr(self, "_ports_cache", None) or {}
+        if not cached or not pid:
+            return []
+        tree = getattr(self, "_pids_tree_cache", None) or {}
+        if pid not in tree:
+            tree[pid] = get_process_tree_pids(pid)
+            self._pids_tree_cache = tree
+        pids = tree.get(pid, {pid})
+        return sorted({p for px in pids if px in cached for p in cached[px]})
+
     def _get_ports_for_selected(self) -> tuple:
         """返回 (首个选中项或 None, 端口列表)。仅当该选中项运行中且确有监听端口时端口非空。"""
         first_it = None
@@ -8351,12 +9228,18 @@ class BatchManagerApp:
             if first_it is None:
                 first_it = it
             pid = it.get("pid")
-            if not pid or not is_process_running(pid):
+            if not pid:
                 continue
-            pids = get_process_tree_pids(pid)
-            ports = get_ports_for_pids(pids)
+            ports = self._ports_from_cache(pid)
             if ports:
                 return (it, ports)
+            # 缓存尚未建立时才回退一次系统查询（启动后首几秒）
+            if not getattr(self, "_ports_cache", None):
+                if not is_process_running(pid):
+                    continue
+                ports = get_ports_for_pids(get_process_tree_pids(pid))
+                if ports:
+                    return (it, ports)
         return (first_it, [])
 
     def _on_open_file(self, file_path: str):
@@ -8391,6 +9274,10 @@ class BatchManagerApp:
             self.status_var.set(self._lang["msg_opened_file"] % os.path.basename(file_path))
         except Exception as e:
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_cannot_open_file"] % str(e))
+
+    def _on_open_tool_folder(self):
+        """在资源管理器中打开程序/工具所在目录。"""
+        self._on_open_dir(str(Path(get_app_path()).resolve().parent))
 
     def _on_open_dir(self, dir_path: str):
         """在资源管理器中打开目录。"""
@@ -8656,6 +9543,8 @@ class BatchManagerApp:
                     "delay_after_dep": r.get("delay_after_dep", 0),
                     "args": r.get("args", ""),
                     "env_vars": r.get("env_vars", ""),
+                    "http_method": r.get("http_method") or "GET",
+                    "http_headers": r.get("http_headers") or "",
                     "startup_timeout": r.get("startup_timeout", 0),
                     "schedule_valid_from": r.get("schedule_valid_from", ""),
                     "schedule_valid_until": r.get("schedule_valid_until", ""),
@@ -9084,15 +9973,10 @@ class BatchManagerApp:
         self._tray_visible = False
         if getattr(self, "_old_wndproc", None) is not None and getattr(self, "_tray_hwnd", None):
             try:
-                import ctypes
-                from ctypes import wintypes
-                ctypes.windll.user32.SetWindowLongPtrW(self._tray_hwnd, -4, self._old_wndproc)
+                _, set_long, _, _ = _win_user32_wndproc_api()
+                set_long(self._tray_hwnd, GWL_WNDPROC, self._old_wndproc)
             except Exception:
-                try:
-                    import ctypes
-                    ctypes.windll.user32.SetWindowLongW(self._tray_hwnd, -4, self._old_wndproc)
-                except Exception:
-                    pass
+                pass
             self._old_wndproc = None
 
     def _try_minimize_to_tray(self) -> bool:
@@ -9119,17 +10003,8 @@ class BatchManagerApp:
             WM_LBUTTONUP = 0x0202
             WM_LBUTTONDBLCLK = 0x0203
             WM_RBUTTONUP = 0x0205
-            GWL_WNDPROC = -4
 
-            hwnd = int(self.root.winfo_id())
-            # 取顶层窗口句柄
-            try:
-                root_hwnd = ctypes.windll.user32.GetParent(hwnd)
-                while root_hwnd:
-                    hwnd = root_hwnd
-                    root_hwnd = ctypes.windll.user32.GetParent(hwnd)
-            except Exception:
-                pass
+            hwnd = _win_toplevel_hwnd(self.root)
 
             hicon = 0
             try:
@@ -9143,11 +10018,15 @@ class BatchManagerApp:
             if not hicon:
                 hicon = ctypes.windll.shell32.ExtractIconW(0, "shell32.dll", 0) or 0
 
-            LRESULT = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
-            WNDPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)
+            WNDPROC, set_long, get_long, call_proc = _win_user32_wndproc_api()
 
             def _wndproc(h, msg, wparam, lparam):
                 try:
+                    if msg == WM_DROPFILES:
+                        paths = _win_hdrop_paths(wparam)
+                        if paths:
+                            self._enqueue_drop_files(paths)
+                        return 0
                     if msg == WM_TRAYICON:
                         lp = int(lparam) & 0xFFFF
                         if lp == WM_RBUTTONUP:
@@ -9159,13 +10038,13 @@ class BatchManagerApp:
                 except Exception:
                     pass
                 try:
-                    return ctypes.windll.user32.CallWindowProcW(self._old_wndproc, h, msg, wparam, lparam)
+                    return call_proc(self._old_wndproc, h, msg, wparam, lparam)
                 except Exception:
                     return 0
 
             self._tray_wndproc_ref = WNDPROC(_wndproc)  # 防 GC
-            set_long = getattr(ctypes.windll.user32, "SetWindowLongPtrW", None) or ctypes.windll.user32.SetWindowLongW
-            self._old_wndproc = set_long(hwnd, GWL_WNDPROC, self._tray_wndproc_ref)
+            self._old_wndproc = get_long(hwnd, GWL_WNDPROC)
+            set_long(hwnd, GWL_WNDPROC, ctypes.cast(self._tray_wndproc_ref, ctypes.c_void_p))
             self._tray_hwnd = hwnd
 
             nid = NID()
@@ -9269,8 +10148,9 @@ class BatchManagerApp:
         self.root.mainloop()
 
 
-def cli_main() -> int:
-    """CLI 入口：见 WindowsBatchScriptManager_api_server 或 命令行 --list --start 等。"""
+def cli_main(argv=None) -> int:
+    """CLI 入口：见 WindowsBatchScriptManager_api_server 或 命令行 --list --start 等。
+    argv 为参数列表（不含程序名）；None 时用 sys.argv。供 API 进程内调用。"""
     def _items():
         raw = load_config()
         out = []
@@ -9278,16 +10158,24 @@ def cli_main() -> int:
             path = r.get("path", "")
             stype = r.get("script_type") or ("python" if r.get("is_python") else (get_script_type(path) or "batch"))
             interp = r.get("interpreter") or r.get("python_exe") or ""
-            out.append({"id": i + 1, "name": r.get("name", "未命名"), "path": path, "work_dir": r.get("work_dir") or "", "group": r.get("group", ""), "script_type": stype, "interpreter": interp, "is_python": stype == "python", "python_exe": interp if stype == "python" else "", "auto_restart": bool(r.get("auto_restart", False)), "log_output": bool(r.get("log_output", False))})
+            out.append({"id": i + 1, "name": r.get("name", "未命名"), "path": path, "work_dir": r.get("work_dir") or "", "group": r.get("group", ""), "script_type": stype, "interpreter": interp, "is_python": stype == "python", "python_exe": interp if stype == "python" else "", "auto_restart": bool(r.get("auto_restart", False)), "log_output": bool(r.get("log_output", False)), "http_method": r.get("http_method") or "GET", "http_headers": r.get("http_headers") or ""})
         return out
 
-    def _running_map():
+    def _running_map(force=False):
+        now = time.time()
+        cache = getattr(cli_main, "_run_map", None)
+        ts = getattr(cli_main, "_run_map_t", 0.0)
+        if not force and cache is not None and (now - ts) < 2.0:
+            return dict(cache)
         m = {}
         if HAS_PSUTIL:
             for x in scan_running_script_processes():
                 sp = (x.get("script_path") or "").strip()
                 if sp:
                     m[os.path.normcase(os.path.abspath(sp))] = x.get("pid")
+        if not force:
+            cli_main._run_map = m
+            cli_main._run_map_t = now
         return m
 
     def _find(items, id_or_name):
@@ -9366,14 +10254,29 @@ def cli_main() -> int:
     ap.add_argument("--export", metavar="F", nargs="?", const="")
     ap.add_argument("--import", dest="import_", metavar="F")
     ap.add_argument("--replace", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.config_path:
         print(CONFIG_PATH.resolve())
         return 0
 
     items = _items()
-    run_map = _running_map()
+    # --add/--update/--export/--import 只动配置，不必扫全系统进程
+    need_procs = bool(
+        args.list or args.start or args.stop or args.restart
+        or args.start_all or args.stop_all or args.restart_all
+        or args.delete or args.shutdown or args.reboot
+        or args.status is not None
+    )
+    force_scan = bool(
+        args.start or args.stop or args.restart
+        or args.start_all or args.stop_all or args.restart_all
+        or args.delete or args.shutdown or args.reboot
+    )
+    run_map = _running_map(force=force_scan) if need_procs else {}
+    if force_scan:
+        cli_main._run_map = None
+        cli_main._run_map_t = 0.0
 
     if args.export is not None:
         data = {"config_path": str(CONFIG_PATH.resolve()), "items": items}
@@ -9566,7 +10469,7 @@ def cli_main() -> int:
             else:
                 print("Already running id=%s pid=%s" % (it["id"], run_map.get(os.path.normcase(abs_path))))
             return 0
-        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None)
+        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
         if not p:
             print("Start failed", file=sys.stderr)
             return 1
@@ -9606,7 +10509,7 @@ def cli_main() -> int:
             for px in get_process_tree_pids(pid):
                 kill_process(px)
             time.sleep(0.5)
-        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None)
+        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
         if not p:
             print("Restart failed", file=sys.stderr)
             return 1
@@ -9622,7 +10525,7 @@ def cli_main() -> int:
             abs_path = resolve_script_file_path(it)
             if run_map.get(os.path.normcase(abs_path)):
                 continue
-            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None)
+            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
             if p:
                 started.append({"id": it["id"], "name": it.get("name"), "pid": p.pid})
                 run_map[os.path.normcase(abs_path)] = p.pid
@@ -9671,7 +10574,7 @@ def cli_main() -> int:
                 continue
             if run_map.get(os.path.normcase(abs_path)):
                 continue
-            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None)
+            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
             if p:
                 started.append({"id": it["id"], "name": it.get("name"), "pid": p.pid})
                 run_map[os.path.normcase(abs_path)] = p.pid
