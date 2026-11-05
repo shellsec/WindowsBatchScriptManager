@@ -4,13 +4,23 @@
 
 1. **安装 PyInstaller**：
    ```bash
-   pip install pyinstaller
+   python -m pip install -r requirements-build.txt
    ```
 
 2. **安装依赖**（推荐）：
    ```bash
    pip install -r requirements.txt
    ```
+
+## 启动时报 Python DLL / embedded python interpreter 错误
+
+此错误发生在 Python 应用代码执行之前。`_MEI...\python310.dll` 是单文件程序临时解压的运行库路径；仅凭弹窗无法区分临时目录权限、安全软件拦截、运行库依赖或目标系统兼容性问题。
+
+默认构建已改为目录版，运行库位于程序旁的 `_internal`，不需要每次启动解压到临时目录；关闭 UPX，并通过独立 `.venv-build` 环境打包。构建机需安装 Python 3.10（含 tkinter）和 Python Launcher。
+
+运行 `build_exe.bat` 后，启动 `dist/release-时间戳/WindowsBatchScriptManager/WindowsBatchScriptManager.exe`。每次写入新发布目录，避免覆盖旧程序旁的用户配置。分发时必须复制整个目录，不能只复制 EXE。已有配置文件可复制到新 EXE 同目录。原有 dist 根目录单文件 EXE 不会删除，请勿误用旧文件。
+
+需要单文件版时运行 `build_exe.bat onefile`；直接使用 spec 时可先设置 `WBSM_ONEFILE=1`。
 
 ## 打包方式
 
@@ -24,7 +34,7 @@ build_exe.bat
 ### 方式二：使用 spec 文件
 
 ```bash
-pyinstaller build_exe.spec
+python -m PyInstaller build_exe.spec
 ```
 
 ### 方式三：命令行直接打包
@@ -35,7 +45,7 @@ pyinstaller --name="WindowsBatchScriptManager" --onefile --windowed --hidden-imp
 
 ## 打包选项说明
 
-- `--onefile`：打包成单个 exe 文件（推荐）
+- `--onefile`：打包成单个 exe 文件（可选；启动时依赖临时目录）
 - `--windowed` 或 `--noconsole`：不显示控制台窗口（GUI 应用）
 - `--hidden-import=psutil`：确保 psutil 被正确打包
 - `--hidden-import=tkinter`：确保 tkinter 相关模块被正确打包

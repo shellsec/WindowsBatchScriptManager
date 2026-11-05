@@ -1,4 +1,5 @@
 # Python
+.venv-build/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -64,3 +65,9 @@ $RECYCLE.BIN/
 
 # 可执行文件（开发环境）
 *.exe
+
+# Persistent task ID allocation metadata
+*.ids.json
+
+# Local planning notes
+/docs/superpowers/

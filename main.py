@@ -26,6 +26,10 @@ import urllib.parse
 from html.parser import HTMLParser
 
 from version import __version__
+from task_features import FEATURE_FIELDS, migrate_items, parse_codes, link_ids, validate_links, environment_vars, merge_task_items
+from task_feature_ui import TaskFeatureMixin
+from ui_language import (LANGUAGE_OPTIONS, detect_system_language, load_ui_catalogs,
+                         normalize_language_preference, translate_inline)
 
 
 class ToolTip:
@@ -332,9 +336,9 @@ def _set_startup_enabled(enabled: bool) -> None:
 
 # 语言字典
 LANGUAGES = {
-    "zh_CN": {
+    "zh-CN": {
         # 主窗口
-        "window_title": "Windows Batch Script Manager - Windows 批处理脚本管理器 - github.com/shellsec/WindowsBatchScriptManager",
+        "window_title": "Windows Batch Script Manager - Windows 批处理脚本管理器",
         "btn_add": "添加",
         "btn_edit": "编辑",
         "btn_delete": "删除",
@@ -864,6 +868,7 @@ LANGUAGES = {
         "msg_api_stop_failed": "API 停止失败",
         "check_launch_api_on_start": "启动本工具时自动启动API",
         "btn_load_api_calls": "一键加载API调用",
+        "btn_check_api_env": "检测运行环境",
         "group_local_api": "本机API",
         "status_api_call_hint": "API: %s  一键加载可写入HTTP调用任务",
         "msg_api_calls_loaded": "已添加 %d 条，更新 %d 条。\n\nid=1 只是示例，请按实际任务 ID 修改 URL。",
@@ -884,7 +889,7 @@ LANGUAGES = {
         "msg_plugins_loaded": "已加载 %d 个插件",
         "msg_plugins_none": "未发现插件（在 plugins/ 目录放入 .py 文件）",
     },
-    "en_US": {
+    "en-US": {
         # Main window
         "window_title": "Windows Batch Script Manager",
         "btn_add": "Add",
@@ -1416,6 +1421,7 @@ LANGUAGES = {
         "msg_api_stop_failed": "Failed to stop API",
         "check_launch_api_on_start": "Launch API when app starts",
         "btn_load_api_calls": "Load API Calls",
+        "btn_check_api_env": "Check Runtime",
         "group_local_api": "Local API",
         "status_api_call_hint": "API: %s  Use Load API Calls to add HTTP tasks",
         "msg_api_calls_loaded": "Added %d, updated %d.\n\nid=1 is only an example; change the URL to a real task ID.",
@@ -1438,43 +1444,24 @@ LANGUAGES = {
     }
 }
 
-def _detect_system_language() -> str:
-    """根据系统环境检测首选语言（用于首次启动无配置文件时）。Windows/Mac/Linux 通用。"""
-    try:
-        # 环境变量：LANG / LC_ALL / LC_MESSAGES（常见于 Linux/Mac）
-        for key in ("LANG", "LC_ALL", "LC_MESSAGES"):
-            val = (os.environ.get(key) or "").strip().lower()
-            if val.startswith("en"):
-                return "en_US"
-            if val.startswith("zh"):
-                return "zh_CN"
-        # locale 模块（部分环境可用）
-        import locale
-        code, _ = locale.getdefaultlocale() or (None, None)
-        if code and code.lower().startswith("en"):
-            return "en_US"
-        if code and code.lower().startswith("zh"):
-            return "zh_CN"
-    except Exception:
-        pass
-    return "zh_CN"
+LANGUAGES = load_ui_catalogs(LANGUAGES)
 
 
 def load_language() -> str:
-    """加载语言偏好。有配置文件则用配置；无则根据系统语言自适应（英文系统用英文，否则中文）。"""
-    if LANGUAGE_CONFIG_PATH.exists():
-        try:
-            with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                lang = config.get("language", "zh_CN")
-                if lang in LANGUAGES:
-                    return lang
-        except Exception:
-            pass
-    return _detect_system_language()
+    """Resolve a saved preference, or follow the operating system language."""
+    try:
+        config = json.loads(LANGUAGE_CONFIG_PATH.read_text(encoding="utf-8"))
+        preference = normalize_language_preference(config.get("language"))
+        if preference in LANGUAGES:
+            return preference
+    except (OSError, ValueError, AttributeError):
+        pass
+    return detect_system_language()
+
 
 def save_language(language: str) -> None:
     """保存语言偏好。"""
+    language = normalize_language_preference(language)
     try:
         with open(LANGUAGE_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump({"language": language}, f, ensure_ascii=False, indent=2)
@@ -1575,9 +1562,10 @@ def _check_circular_deps(items: list, start_id: int) -> Optional[str]:
     id_map = {it.get("id"): it for it in items}
     visited, path = set(), []
     def dfs(cid):
+        if cid in path:
+            return " → ".join(str(x) for x in path[path.index(cid):] + [cid])
         if cid in visited:
-            i = path.index(cid) if cid in path else len(path)
-            return " → ".join(str(x) for x in path[i:] + [cid])
+            return None
         visited.add(cid); path.append(cid)
         for d in _parse_dep_ids((id_map.get(cid) or {}).get("depends_on")):
             r = dfs(d)
@@ -1646,6 +1634,8 @@ def config_item_to_save(it: dict) -> dict:
             stype = get_script_type(it.get("path", "")) or "batch"
     interpreter = it.get("interpreter") or it.get("python_exe") or ""
     return {
+        "id": it.get("id"),
+        **{key: it[key] for key in FEATURE_FIELDS if key in it},
         "name": it.get("name", ""),
         "path": it.get("path", ""),
         "work_dir": it.get("work_dir") or "",
@@ -1685,6 +1675,11 @@ def config_item_to_save(it: dict) -> dict:
 def next_item_id(items: list) -> int:
     """分配新任务 ID：max(已有 id)+1，避免删除后 len+1 与旧 id 冲突。"""
     max_id = 0
+    try:
+        state = json.loads(CONFIG_PATH.with_name(CONFIG_PATH.name + '.ids.json').read_text(encoding='utf-8'))
+        max_id = max(0, int(state.get('max_id', 0)))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     for it in items:
         try:
             max_id = max(max_id, int(it.get("id", 0)))
@@ -1712,7 +1707,10 @@ def load_config() -> list:
         return []
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if not isinstance(data, list) or any(not isinstance(x, dict) for x in data):
+                raise ValueError("Task configuration must be a list of objects")
+            return migrate_items(data)
     except Exception as e:
         try:
             import logging
@@ -1728,6 +1726,16 @@ def save_config(items: list) -> bool:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
+    # Preserve the allocation high-water mark even when the largest task is deleted.
+    previous = []
+    try:
+        previous = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
+        if not isinstance(previous, list): previous = []
+    except (OSError, ValueError):
+        pass
+    high_water = next_item_id(items + [i for i in previous if isinstance(i, dict)]) - 1
+    if not _atomic_write_json(CONFIG_PATH.with_name(CONFIG_PATH.name + '.ids.json'), {'max_id': high_water}):
+        return False
     tmp_path = CONFIG_PATH.parent / (CONFIG_PATH.name + ".tmp")
     bak_path = CONFIG_PATH.parent / (CONFIG_PATH.name + ".bak")
     try:
@@ -1920,7 +1928,7 @@ def get_process_info(pid: int) -> Optional[dict]:
         return None
     try:
         p = psutil.Process(pid)
-        return {"name": p.name(), "exe": getattr(p, "exe", "") or "", "cmdline": " ".join(p.cmdline() or [])[:200]}
+        return {"name": p.name(), "exe": p.exe() or "", "cmdline": " ".join(p.cmdline() or [])[:200]}
     except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
         return None
 
@@ -2053,8 +2061,10 @@ def kill_process(pid: int, force: bool = True) -> bool:
                         pass
             # 验证进程是否真的终止
             return not p.is_running()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except psutil.NoSuchProcess:
             return True  # 进程已不存在，视为成功
+        except psutil.AccessDenied:
+            return False
     try:
         subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=5)
         return not is_process_running(pid)
@@ -2325,6 +2335,30 @@ def stop_api_server_processes(owned_popen=None) -> int:
         if ok or not is_process_running(pid):
             stopped += 1
     return stopped
+
+
+def default_python_executable() -> Optional[str]:
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    import shutil
+
+    return shutil.which("python") or shutil.which("py") or shutil.which("python3")
+
+
+def probe_api_python(executable: str) -> dict:
+    """Check the interpreter selected by the API launcher."""
+    code = (
+        "import importlib.util, json, sys; "
+        "print(json.dumps({'executable': sys.executable, 'version': sys.version.split()[0], "
+        "'missing': [name for name in ('fastapi', 'uvicorn') "
+        "if importlib.util.find_spec(name) is None]}))"
+    )
+    result = subprocess.run(
+        [executable, "-c", code], capture_output=True, encoding="utf-8",
+        errors="replace", timeout=8, check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return json.loads(result.stdout)
 
 
 def start_api_server() -> Optional[subprocess.Popen]:
@@ -2736,9 +2770,12 @@ def normalize_http_method(method) -> str:
     return m if m in ("GET", "POST") else "GET"
 
 
-def build_http_request_curl_args(curl_exe: str, url: str, method=None, headers_raw=None) -> list:
+def build_http_request_curl_args(curl_exe: str, url: str, method=None, headers_raw=None, capture_response=False) -> list:
     """构造 curl 参数（缺省 GET、无额外请求头）。"""
     args = [curl_exe, "-s", "-o", os.devnull, "-w", "%{http_code}", "--max-time", "30", "--connect-timeout", "10"]
+    if capture_response:
+        args = [curl_exe, "-sS", "-w", "\nHTTP %{http_code}\n", "--max-time", "30",
+                "--connect-timeout", "10", "--max-filesize", "1048576"]
     method = normalize_http_method(method)
     if method != "GET":
         args.extend(["-X", method])
@@ -2759,6 +2796,7 @@ def start_script(
     env_vars: Optional[str] = None,
     http_method: Optional[str] = None,
     http_headers: Optional[str] = None,
+    capture_http: bool = False,
 ) -> Optional[subprocess.Popen]:
     path = (path or "").strip()
     _set_start_error("")
@@ -2796,7 +2834,11 @@ def start_script(
             args = [shell, "-lc", full_cmd]
         cwd = work_dir if work_dir else None
     elif is_process:
-        return start_process_by_name(path, work_dir)
+        args = [path]
+        if extra_args and extra_args.strip():
+            from task_features import split_arguments
+            args.extend(split_arguments(extra_args))
+        cwd = work_dir or None
     elif is_http_get:
         import shutil
         # Windows 10+ 自带 curl.exe，Linux/Mac 也都有
@@ -2804,7 +2846,7 @@ def start_script(
         headers_raw = http_headers or ""
         curl_exe = shutil.which("curl")
         if curl_exe:
-            args = build_http_request_curl_args(curl_exe, path, method, headers_raw)
+            args = build_http_request_curl_args(curl_exe, path, method, headers_raw, capture_response=capture_http)
         else:
             # 回退：查找系统 python 执行 urllib 请求
             python_exe = shutil.which("python") or shutil.which("python3") or shutil.which("py")
@@ -2815,8 +2857,18 @@ def start_script(
             _py = (
                 "import urllib.request;"
                 "req=urllib.request.Request(%s,data=(b'' if %s!='GET' else None),method=%s,headers=%s);"
-                "r=urllib.request.urlopen(req,timeout=30); print(r.status)"
             ) % (_safe_url, _safe_method, _safe_method, _safe_headers)
+            if capture_http:
+                _py += (
+                    "\nimport sys\nfrom urllib.error import HTTPError\n"
+                    "try:\n r=urllib.request.urlopen(req,timeout=30)\nexcept HTTPError as exc:\n r=exc\n"
+                    "with r:\n sys.stdout.buffer.write(r.read(65537))\n print(f'\\nHTTP {r.status}', flush=True)\n",
+                )
+                if not python_exe and getattr(sys, "frozen", False):
+                    _set_start_error("HTTP: curl or Python is required")
+                    return None
+            else:
+                _py += "r=urllib.request.urlopen(req,timeout=30); print(r.status)"
             if python_exe:
                 args = [python_exe, "-c", _py]
             elif not getattr(sys, 'frozen', False):
@@ -2867,25 +2919,16 @@ def start_script(
             else:
                 # 如果未指定解释器，尝试使用系统 Python
                 # 在 PyInstaller 打包的 exe 中，sys.executable 指向 exe 本身，不能用于运行 Python 脚本
-                if getattr(sys, 'frozen', False):
-                    # 打包后的 exe：尝试查找系统 Python
-                    # 优先尝试 'python' 命令，如果失败则尝试 'py'
-                    import shutil
-                    python_exe = shutil.which("python") or shutil.which("py") or shutil.which("python3")
-                    if python_exe:
-                        args = [python_exe, abs_path]
-                    else:
-                        # 如果找不到 Python，提示错误
-                        _set_start_error("python not found (install Python or set interpreter)")
-                        return None
-                else:
-                    # 开发环境：使用当前 Python 解释器
-                    args = [sys.executable, abs_path]
+                python_exe = default_python_executable()
+                if not python_exe:
+                    _set_start_error("python not found (install Python or set interpreter)")
+                    return None
+                args = [python_exe, abs_path]
         elif script_type == "node":
             exe = (interpreter or "").strip() or "node"
             args = [exe, abs_path]
         elif script_type == "powershell":
-            args = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", abs_path]
+            args = [(interpreter or "").strip() or "powershell.exe", "-ExecutionPolicy", "Bypass", "-File", abs_path]
         elif script_type == "vbs":
             args = ["cscript.exe", "//NoLogo", abs_path]
         elif script_type == "jscript":
@@ -2904,7 +2947,8 @@ def start_script(
 
         # 追加额外启动参数
         if extra_args and extra_args.strip():
-            args.extend(extra_args.strip().split())
+            from task_features import split_arguments
+            args.extend(split_arguments(extra_args))
     
     # 构建环境变量
     proc_env = None
@@ -2918,6 +2962,28 @@ def start_script(
                 k, v = line.split("=", 1)
                 proc_env[k.strip()] = v.strip()
     
+    if getattr(sys, "frozen", False) or "_PYI_ARCHIVE_FILE" in os.environ:
+        if proc_env is None:
+            proc_env = os.environ.copy()
+        # Managed jobs and the API service can outlive this application's bundle.
+        proc_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+    if capture_http and is_http_get:
+        import tempfile
+
+        try:
+            with tempfile.TemporaryFile() as response:
+                process = subprocess.Popen(
+                    args, cwd=cwd or None, env=proc_env, stdin=subprocess.DEVNULL,
+                    stdout=response, stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                process.http_response = os.fdopen(os.dup(response.fileno()), "rb")
+                return process
+        except OSError as exc:
+            _set_start_error(f"HTTP: {exc}")
+            return None
+
     # 记录输出到文件
     use_log = bool(log_path)
     if use_log:
@@ -3144,7 +3210,8 @@ class AddEditDialog(tk.Toplevel):
         # 获取语言字典：直接从保存的语言配置读取（确保使用最新语言）
         current_lang = load_language()
         if current_lang not in LANGUAGES:
-            current_lang = "zh_CN"
+            current_lang = "zh-CN"
+        self._current_language = current_lang
         self._lang = LANGUAGES[current_lang]
         self.title(self._lang["dialog_edit"] if mode == "edit" else self._lang["dialog_add_edit"])
         self.geometry("620x520")
@@ -3152,6 +3219,7 @@ class AddEditDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
+        self._feature_initial = dict(initial)
         self.var_name = tk.StringVar(value=initial.get("name", ""))
         self.var_path = tk.StringVar(value=initial.get("path", ""))
         _init_http_method = (initial.get("http_method") or "GET").strip().upper()
@@ -3308,9 +3376,9 @@ class AddEditDialog(tk.Toplevel):
         _init_stype = initial.get("script_type") or get_script_type(initial.get("path", ""))
         _type_options = [
             ("script", self._lang["label_script_path"].rstrip(":：")),
-            ("http_get", "HTTP" + ("请求" if self._lang == LANGUAGES["zh_CN"] else " GET")),
-            ("process", "进程管理" if self._lang == LANGUAGES["zh_CN"] else "Process"),
-            ("command", "直接命令" if self._lang == LANGUAGES["zh_CN"] else "Command"),
+            ("http_get", "HTTP" + ("请求" if self._lang == LANGUAGES["zh-CN"] else " GET")),
+            ("process", "进程管理" if self._lang == LANGUAGES["zh-CN"] else "Process"),
+            ("command", "直接命令" if self._lang == LANGUAGES["zh-CN"] else "Command"),
             ("system_shutdown", self._lang["task_type_system_shutdown"]),
             ("system_reboot", self._lang["task_type_system_reboot"]),
         ]
@@ -3397,8 +3465,10 @@ class AddEditDialog(tk.Toplevel):
         self.label_interpreter.grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
         self.entry_interpreter = ttk.Entry(tab_basic, textvariable=self.var_interpreter, width=50)
         self.entry_interpreter.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
+        from task_feature_ui import choose_environment
+        ttk.Button(tab_basic, text=translate_inline(current_lang, "选择环境", "Environment"), command=lambda: choose_environment(self, self.var_path.get(), self.var_work.get(), self.var_interpreter, self._feature_initial, current_lang)).grid(row=row, column=2, padx=2)
         self.label_interpreter_hint = ttk.Label(tab_basic, text="")
-        self.label_interpreter_hint.grid(row=row, column=2, sticky=tk.W, padx=2)
+        self.label_interpreter_hint.grid(row=row, column=3, sticky=tk.W, padx=2)
         row += 1
         self.var_log = tk.BooleanVar(value=bool(initial.get("log_output", False)))
         self.cb_log = ttk.Checkbutton(tab_basic, text=self._lang["check_log_output"], variable=self.var_log)
@@ -3918,15 +3988,15 @@ class AddEditDialog(tk.Toplevel):
             "powershell": self._lang["label_type_prefix"] + "PowerShell",
             "vbs": self._lang["label_type_prefix"] + "VBScript",
             "jscript": self._lang["label_type_prefix"] + "JScript",
-            "batch": self._lang["label_type_prefix"] + "批处理" if self._lang == LANGUAGES["zh_CN"] else self._lang["label_type_prefix"] + "Batch",
+            "batch": self._lang["label_type_prefix"] + "批处理" if self._lang == LANGUAGES["zh-CN"] else self._lang["label_type_prefix"] + "Batch",
             "shell": self._lang["label_type_prefix"] + "Shell",
             "wsf": self._lang["label_type_prefix"] + "WSF",
             "exe": self._lang["label_type_prefix"] + "EXE",
-            "http_get": self._lang["label_type_prefix"] + ("HTTP GET" if self._lang != LANGUAGES["zh_CN"] else "HTTP请求"),
-            "process": self._lang["label_type_prefix"] + ("进程管理" if self._lang == LANGUAGES["zh_CN"] else "Process"),
-            "command": self._lang["label_type_prefix"] + ("直接命令" if self._lang == LANGUAGES["zh_CN"] else "Command"),
+            "http_get": self._lang["label_type_prefix"] + ("HTTP GET" if self._lang != LANGUAGES["zh-CN"] else "HTTP请求"),
+            "process": self._lang["label_type_prefix"] + ("进程管理" if self._lang == LANGUAGES["zh-CN"] else "Process"),
+            "command": self._lang["label_type_prefix"] + ("直接命令" if self._lang == LANGUAGES["zh-CN"] else "Command"),
         }
-        default = self._lang["label_type_prefix"] + ("批处理" if self._lang == LANGUAGES["zh_CN"] else "Batch")
+        default = self._lang["label_type_prefix"] + ("批处理" if self._lang == LANGUAGES["zh-CN"] else "Batch")
         return type_names.get(stype, default)
 
     def _on_task_type_changed(self, event=None):
@@ -4053,12 +4123,12 @@ class AddEditDialog(tk.Toplevel):
             self._on_task_type_changed()
 
         if current_key == "command":
-            self.label_type.config(text=self._lang["label_type_prefix"] + ("直接命令" if self._lang == LANGUAGES["zh_CN"] else "Command"))
+            self.label_type.config(text=self._lang["label_type_prefix"] + ("直接命令" if self._lang == LANGUAGES["zh-CN"] else "Command"))
         else:
             self.label_type.config(text=self._type_from_path(p))
         
         # 根据脚本类型显示/隐藏解释器输入框
-        needs_interpreter = stype in ("python", "node", "shell")
+        needs_interpreter = stype in ("python", "node", "shell", "powershell")
         if needs_interpreter:
             self.label_interpreter.grid()
             self.entry_interpreter.grid()
@@ -4095,7 +4165,7 @@ class AddEditDialog(tk.Toplevel):
         if sys.platform != "win32":
             # Mac/Linux：弱化 Windows 专用扩展名，默认「全部脚本」不含 bat/cmd/vbs/wsf/exe
             all_ext = "*.sh;*.py;*.js;*.mjs;*.cjs;*.ts;*.jsx;*.tsx;*.ps1"
-            if self._lang == LANGUAGES["zh_CN"]:
+            if self._lang == LANGUAGES["zh-CN"]:
                 filetypes = [
                     ("Shell", "*.sh"),
                     ("Python", "*.py"),
@@ -4113,7 +4183,7 @@ class AddEditDialog(tk.Toplevel):
                     ("All Scripts", all_ext),
                     ("All Files", "*.*"),
                 ]
-        elif self._lang == LANGUAGES["zh_CN"]:
+        elif self._lang == LANGUAGES["zh-CN"]:
             filetypes = [
                 ("全部脚本", all_ext),
                 ("批处理", "*.bat;*.cmd"),
@@ -4223,6 +4293,7 @@ class AddEditDialog(tk.Toplevel):
         # 兼容旧配置：如果存在 is_python，转换为 script_type
         is_py = stype == "python"
         self.result = {
+            **{key: self._feature_initial[key] for key in FEATURE_FIELDS if key in self._feature_initial},
             "name": name,
             "path": path,
             "work_dir": work,
@@ -4427,9 +4498,11 @@ class HistoryDialog(tk.Toplevel):
             return
         # 统计信息
         total = len(sorted_history)
-        success = sum(1 for h in sorted_history if h.get("exit_code") == 0)
+        item = next((i for i in self.app.items if i.get('id') == item_id), {})
+        codes = parse_codes(item.get('success_exit_codes', [0]))
+        success = sum(1 for h in sorted_history if h.get('status') == 'success' or (h.get('status') not in ('stopped', 'failed', 'unknown') and h.get('exit_code') in codes))
         failed = total - success
-        avg_duration = sum(h.get("duration", 0) for h in sorted_history) / total if total > 0 else 0
+        avg_duration = sum((h.get("duration") or 0) for h in sorted_history) / total if total > 0 else 0
         self.stats_label.config(
             text=f"{self._lang['stat_total'] % total} | {self._lang['stat_success'] % success} | {self._lang['stat_failed'] % failed} | {self._lang['stat_avg_duration'] % avg_duration}"
         )
@@ -4439,7 +4512,7 @@ class HistoryDialog(tk.Toplevel):
             stop_time = datetime.fromtimestamp(record.get("stop_time", 0)).strftime("%Y-%m-%d %H:%M:%S") if record.get("stop_time") else "-"
             duration = f"{record.get('duration', 0):.1f} 秒" if record.get("duration") else "-"
             exit_code = str(record.get("exit_code", "?")) if record.get("exit_code") is not None else "?"
-            status = "异常" if record.get("status") == "crashed" else "正常"
+            status = {'success': '成功 / Success', 'failed': '失败 / Failed', 'unknown': '未知 / Unknown', 'stopped': '已停止 / Stopped', 'running': '运行中 / Running', 'crashed': '异常 / Failed'}.get(record.get('status'), '未知 / Unknown')
             self.tree.insert("", tk.END, values=(start_time, stop_time, duration, exit_code, status))
             
     def _on_clear_history(self):
@@ -4698,7 +4771,7 @@ class NotificationConfigDialog(tk.Toplevel):
         ttk.Checkbutton(webhook_frame, text=self._lang["label_webhook_send_data"], variable=self.var_webhook_send_data).pack(anchor=tk.W, pady=5)
         
         # 提示信息
-        if self._lang == LANGUAGES["zh_CN"]:
+        if self._lang == LANGUAGES["zh-CN"]:
             hint_text = """Webhook 通知说明：
 • GET 请求：数据作为查询参数发送（如不勾选"发送数据"，则只发送 URL）
 • POST 请求：数据以 JSON 格式发送（如不勾选"发送数据"，则只发送空请求）
@@ -4727,12 +4800,12 @@ class NotificationConfigDialog(tk.Toplevel):
         try:
             if send_data:
                 test_data = {
-                    "script_name": "测试脚本" if self._lang == LANGUAGES["zh_CN"] else "Test Script",
-                    "reason": "测试通知" if self._lang == LANGUAGES["zh_CN"] else "Test Notification",
+                    "script_name": "测试脚本" if self._lang == LANGUAGES["zh-CN"] else "Test Script",
+                    "reason": "测试通知" if self._lang == LANGUAGES["zh-CN"] else "Test Notification",
                     "exit_code": 1,
                     "duration": 2.5,
                     "timestamp": datetime.now().isoformat(),
-                    "status": "测试" if self._lang == LANGUAGES["zh_CN"] else "Test",
+                    "status": "测试" if self._lang == LANGUAGES["zh-CN"] else "Test",
                 }
             else:
                 test_data = {}
@@ -5066,7 +5139,7 @@ class TailLogDialog(tk.Toplevel):
 # GUI
 # ---------------------------------------------------------------------------
 
-class BatchManagerApp:
+class BatchManagerApp(TaskFeatureMixin):
     def __init__(self, start_minimized_cli: bool = False):
         self._start_minimized_cli = bool(start_minimized_cli)
         self._app_config = {"start_minimized": False, "close_to_tray": False}
@@ -5160,6 +5233,7 @@ class BatchManagerApp:
 
     def _load_app_config(self):
         saved = load_app_config()
+        self._app_config['max_concurrent_tasks'] = saved.get('max_concurrent_tasks', 0)
         if "start_minimized" in saved:
             self._app_config["start_minimized"] = bool(saved["start_minimized"])
         if "close_to_tray" in saved:
@@ -5330,12 +5404,21 @@ class BatchManagerApp:
             self._on_drop_files_impl(files)
         except Exception:
             try:
-                self.status_var.set("拖放处理异常，请重试" if self._current_language == "zh_CN" else "Drag-drop error, please try again.")
+                self.status_var.set("拖放处理异常，请重试" if self._current_language == "zh-CN" else "Drag-drop error, please try again.")
             except Exception:
                 pass
 
     def _on_drop_files_impl(self, files):
         if not files:
+            return
+        decoded = []
+        for value in files:
+            if isinstance(value, bytes):
+                try: value = value.decode("utf-8")
+                except UnicodeDecodeError: value = value.decode("gbk", errors="replace")
+            decoded.append(str(value).strip().strip('"').replace("\x00", ""))
+        if any(os.path.isdir(value) for value in decoded):
+            self._preview_script_import(decoded)
             return
         paths = []
         for f in files:
@@ -5414,8 +5497,10 @@ class BatchManagerApp:
         # 语言菜单
         lang_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label=self._lang.get("menu_language", "语言"), menu=lang_menu)
-        lang_menu.add_command(label=self._lang.get("menu_language_zh", "中文"), command=lambda: self._switch_language("zh_CN"))
-        lang_menu.add_command(label=self._lang.get("menu_language_en", "English"), command=lambda: self._switch_language("en_US"))
+        self._language_menu = lang_menu
+        lang_menu.add_command(label=self._task_text("跟随系统", "Follow system"), command=lambda: self._switch_language("system"))
+        for code, name in LANGUAGE_OPTIONS.items():
+            lang_menu.add_command(label=name, command=lambda selected=code: self._switch_language(selected))
         
         # 设置：刷新间隔（保存引用以便切换语言时更新英文）
         self._settings_menu = tk.Menu(menubar, tearoff=0)
@@ -5554,6 +5639,10 @@ class BatchManagerApp:
         self.btn_restart_api.pack(side=tk.LEFT, padx=2)
         self.btn_load_api_calls = ttk.Button(row_api, text=self._lang["btn_load_api_calls"], command=self._on_load_api_call_tasks)
         self.btn_load_api_calls.pack(side=tk.LEFT, padx=2)
+        self.btn_check_api_env = ttk.Button(
+            row_api, text=self._lang["btn_check_api_env"], command=self._on_check_api_environment,
+        )
+        self.btn_check_api_env.pack(side=tk.LEFT, padx=2)
         ttk.Separator(row_api, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
         self.var_api_launch_on_start = tk.BooleanVar(value=bool(self._api_config.get("launch_on_app_start", False)))
         self.check_api_launch_on_start = ttk.Checkbutton(
@@ -5617,9 +5706,12 @@ class BatchManagerApp:
         self.btn_tail_log.pack(side=tk.LEFT, padx=2)
         self.btn_restart_self = ttk.Button(row3, text=self._lang["btn_restart_self"], command=self._on_restart_self)
         self.btn_restart_self.pack(side=tk.LEFT, padx=2)
+        self._toolbar_rows = (row1, row1b, row_api, row2, row3)
+        for row in self._toolbar_rows:
+            row.bind("<Configure>", lambda event, frame=row: self._wrap_toolbar_row(frame), add="+")
 
 
-        # 外网 / 本地 IP 同一行、整体靠左排列
+        # 公网和局域网 IP 可点击复制
         row_ip = ttk.Frame(toolbar_outer)
         row_ip.pack(fill=tk.X, pady=(4, 0), anchor=tk.W)
         ip_inline = ttk.Frame(row_ip)
@@ -5643,7 +5735,7 @@ class BatchManagerApp:
         self.ip_label.bind("<Leave>", lambda e: self._on_local_ip_leave())
         self.hint_copy_label = ttk.Label(ip_inline, text=self._lang["hint_click_to_copy"], font=("", 8), foreground="gray")
         self.hint_copy_label.pack(side=tk.LEFT, padx=(4, 0))
-        # 外网IP/本地IP 在主循环启动后由 run() 里 after(0, _start_ip_load_threads) 异步加载，避免 "main thread is not in main loop"
+        # 公网和局域网 IP 在主循环启动后异步加载
 
         # 筛选行：按分组过滤（带横向滚动，与工具栏左对齐）
         filter_container = ttk.Frame(self.root)
@@ -5692,7 +5784,7 @@ class BatchManagerApp:
         # 筛选控件
         self.label_filter = ttk.Label(filter_frame, text=self._lang["label_filter_group"])
         self.label_filter.pack(side=tk.LEFT, padx=(0, 4))
-        self.filter_group_var = tk.StringVar(value="全部" if self._current_language == "zh_CN" else "All")
+        self.filter_group_var = tk.StringVar(value=self._task_text("全部", "All"))
         self.filter_combo = ttk.Combobox(filter_frame, textvariable=self.filter_group_var, width=20, state="readonly")
         self.filter_combo.pack(side=tk.LEFT, padx=2)
         self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self._apply_group_filter())
@@ -5724,6 +5816,7 @@ class BatchManagerApp:
 
         # 列表（PanedWindow 必须用 add 添加子控件；列表加横向滚动条，避免状态、PID、端口列被挤出视区）
         pan = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
+        self.task_pane = pan
         pan.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
         tree_frame = ttk.Frame(pan)
@@ -5753,9 +5846,9 @@ class BatchManagerApp:
         self.tree.column("group", width=80)
         self.tree.column("path", width=200)
         self.tree.column("work_dir", width=80)
-        self.tree.column("type", width=52)
-        self.tree.column("status", width=56)
-        self.tree.column("schedule", width=160)
+        self.tree.column("type", width=84)
+        self.tree.column("status", width=104)
+        self.tree.column("schedule", width=225)
         self.tree.column("title", width=180)
         self.tree.column("ports", width=100)
         self.tree.column("pid", width=52)
@@ -5798,6 +5891,9 @@ class BatchManagerApp:
         self.detail_frame = ttk.LabelFrame(pan, text=self._lang["detail_label"])
         pan.add(self.detail_frame, weight=0)
         self.detail_text = tk.Text(self.detail_frame, height=3, wrap=tk.WORD, state=tk.DISABLED, font=("Consolas", 9))
+        detail_scroll = ttk.Scrollbar(self.detail_frame, command=self.detail_text.yview)
+        detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.detail_text.configure(yscrollcommand=detail_scroll.set)
         self.detail_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
@@ -5869,10 +5965,19 @@ class BatchManagerApp:
         rows = self._get_selected_rows()
         it = self._item_at(rows[0]) if rows else None
         if it:
-            if self._current_language == "zh_CN":
-                s = f"路径: {it.get('path','')}\n工作目录: {it.get('work_dir','') or '(同脚本目录)'}"
-            else:
-                s = f"Path: {it.get('path','')}\nWork Directory: {it.get('work_dir','') or '(same as script dir)'}"
+            path_label = self._task_text("路径", "Path")
+            work_label = self._task_text("工作目录", "Work Directory")
+            work_dir = it.get("work_dir") or self._task_text("（同脚本目录）", "(same as script dir)")
+            s = f"{path_label}: {it.get('path', '')}\n{work_label}: {work_dir}"
+            is_http = _is_http_task_item(it)
+            self.detail_text.config(height=8 if is_http else 3)
+            if is_http and it.get("_http_response") is not None:
+                heading = self._task_text("HTTP 返回结果", "HTTP response")
+                s += f"\n\n{heading}\n{it['_http_response']}"
+                pane_height = self.task_pane.winfo_height()
+                target_height = min(200, pane_height // 3)
+                if target_height > self.detail_frame.winfo_height():
+                    self.task_pane.sashpos(0, pane_height - target_height)
             self.detail_text.config(state=tk.NORMAL)
             self.detail_text.delete("1.0", tk.END)
             self.detail_text.insert("1.0", s)
@@ -5948,13 +6053,43 @@ class BatchManagerApp:
         messagebox.showerror(self._lang["msg_error"], self._lang.get("msg_notification_save_failed", "通知配置保存失败"))
         return False
 
+    def _wrap_toolbar_row(self, row):
+        width = row.winfo_width()
+        if width <= 4:
+            return
+        x = y = line_height = 0
+        layout = []
+        for widget in row.winfo_children():
+            widget_width = min(widget.winfo_reqwidth(), width - 4)
+            widget_height = widget.winfo_reqheight()
+            if x and x + widget_width + 4 > width:
+                x = 0
+                y += line_height + 3
+                line_height = 0
+            layout.append((widget, x + 2, y, widget_width))
+            x += widget_width + 4
+            line_height = max(line_height, widget_height)
+        height = y + line_height
+        if getattr(row, "_toolbar_layout", None) == (layout, height):
+            return
+        row._toolbar_layout = (layout, height)
+        row.pack_propagate(False)
+        row.configure(height=height)
+        for widget, left, top, widget_width in layout:
+            widget.pack_forget()
+            widget.place(x=left, y=top, width=widget_width)
+
     def _switch_language(self, language: str):
         """切换语言。"""
-        if language not in LANGUAGES:
-            return
+        preference = normalize_language_preference(language)
+        language = detect_system_language() if preference == "system" else preference
+        previous_language = self._current_language
+        previous_labels = self._lang
         self._current_language = language
         self._lang = LANGUAGES[language]
-        save_language(language)
+        save_language(preference)
+        self._language_menu.entryconfig(0, label=self._task_text("跟随系统", "Follow system"))
+        self._refresh_task_menu_language()
         # 更新窗口标题
         self.root.title(self._format_window_title())
         # 更新所有按钮文本
@@ -6012,6 +6147,7 @@ class BatchManagerApp:
             self.btn_restart_api.config(text=self._lang["btn_restart_api"])
         if getattr(self, "btn_load_api_calls", None):
             self.btn_load_api_calls.config(text=self._lang["btn_load_api_calls"])
+            self.btn_check_api_env.config(text=self._lang["btn_check_api_env"])
         if getattr(self, "check_api_launch_on_start", None):
             self.check_api_launch_on_start.config(text=self._lang["check_launch_api_on_start"])
         self._update_api_status_label()
@@ -6031,14 +6167,16 @@ class BatchManagerApp:
         self.hint_copy_label.config(text=self._lang["hint_click_to_copy"])
         # 如果IP是"无法获取"，更新显示文本
         current_ip_text = self.ip_label.cget("text")
-        if current_ip_text == "无法获取" or current_ip_text == "Unable to get IP address":
+        if current_ip_text in ("无法获取", "Unable to get IP address", previous_labels["msg_ip_unavailable"]):
             self.ip_label.config(text=self._lang["msg_ip_unavailable"])
+        elif current_ip_text == previous_labels["hint_loading"]:
+            self.ip_label.config(text=self._lang["hint_loading"])
         # 更新外网IP标签文本（如果已加载）
         current_public_ip_text = self.public_ip_label.cget("text")
-        if current_public_ip_text == "无法获取" or current_public_ip_text == "Unable to get IP address":
+        if current_public_ip_text in ("无法获取", "Unable to get IP address", previous_labels["msg_ip_unavailable"]):
             self.public_ip_label.config(text=self._lang["msg_ip_unavailable"], foreground="gray", cursor="arrow")
             self.hint_copy_public_label.config(text="")
-        elif current_public_ip_text == "(获取中...)" or current_public_ip_text == "(Loading...)":
+        elif current_public_ip_text == previous_labels["hint_loading"]:
             self.public_ip_label.config(text=self._lang["hint_loading"])
             self.hint_copy_public_label.config(text="")
         else:
@@ -6071,23 +6209,23 @@ class BatchManagerApp:
         # 更新状态栏
         self.status_var.set(self._lang["status_ready_msg"])
         # 更新筛选下拉框的"全部"选项
-        if self.filter_group_var.get() in ("全部", "All"):
-            self.filter_group_var.set("全部" if language == "zh_CN" else "All")
+        if self.filter_group_var.get() == translate_inline(previous_language, "全部", "All"):
+            self.filter_group_var.set(self._task_text("全部", "All"))
         # 更新菜单
         try:
             menubar = self.root.nametowidget(self.root.cget("menu"))
             for i in range(menubar.index("end") + 1):
                 try:
                     menu_label = menubar.entryconfig(i, "label")[4]
-                    if menu_label and ("语言" in menu_label or "Language" in menu_label):
+                    if menu_label == previous_labels["menu_language"]:
                         menubar.entryconfig(i, label=self._lang.get("menu_language", "语言"))
-                    elif menu_label and ("首页" in menu_label or "Home" in menu_label):
+                    elif menu_label == previous_labels["menu_home"]:
                         menubar.entryconfig(i, label=self._lang.get("menu_home", "首页"))
-                    elif menu_label and ("开机启动" in menu_label or "Start with Windows" in menu_label):
+                    elif menu_label == previous_labels["menu_startup"]:
                         menubar.entryconfig(i, label=self._lang.get("menu_startup", "开机启动"))
                         if (sys.platform == "win32" or _PLATFORM) and getattr(self, "_startup_menu", None):
                             self._update_startup_submenu_labels()
-                    elif menu_label and ("设置" in menu_label or "Settings" in menu_label):
+                    elif menu_label == previous_labels["menu_settings"]:
                         menubar.entryconfig(i, label=self._lang.get("menu_settings", "设置"))
                         if getattr(self, "_settings_menu", None):
                             self._settings_menu.entryconfig(0, label=self._lang.get("menu_refresh_interval", "刷新间隔"))
@@ -6111,10 +6249,26 @@ class BatchManagerApp:
                     pass
         except:
             pass
+        for menu, keys in (
+            (self._settings_menu, ("menu_close_to_tray", "menu_minimize_to_tray",
+                                   "menu_restore_bak", "menu_global_hotkeys", "menu_about")),
+            (self._refresh_menu, ("btn_pause_refresh", "btn_resume_refresh")),
+        ):
+            updated_labels = {previous_labels[key]: self._lang[key] for key in keys
+                              if key in previous_labels and key in self._lang}
+            for index in range(menu.index("end") + 1):
+                if menu.type(index) == "separator":
+                    continue
+                label = menu.entrycget(index, "label")
+                if label in updated_labels:
+                    menu.entryconfig(index, label=updated_labels[label])
         # 更新分组筛选选项
         self._update_group_filter_options()
         # 刷新表格显示
         self._sync_tree()
+        self._on_select(None)
+        for row in self._toolbar_rows:
+            self._wrap_toolbar_row(row)
 
     def _record_execution_start(self, item_id: int, trigger: str = "manual"):
         """记录脚本启动时间。trigger: 'manual' 或 'schedule'。"""
@@ -6145,7 +6299,8 @@ class BatchManagerApp:
                 record["stop_time"] = time.time()
                 record["duration"] = duration
                 record["exit_code"] = exit_code
-                record["status"] = "crashed" if (exit_code is not None and exit_code != 0) else "stopped"
+                item = next((x for x in self.items if x.get("id") == item_id), {})
+                record["status"] = "unknown" if exit_code is None else ("success" if exit_code in parse_codes(item.get("success_exit_codes", [0])) else "failed")
                 break
         self._save_history()
         # 检查是否需要通知
@@ -6168,7 +6323,7 @@ class BatchManagerApp:
         reason = ""
         # 检查退出码
         if self._notification_config.get("notify_on_nonzero_exit", True):
-            if exit_code is not None and exit_code != 0:
+            if exit_code is not None and exit_code not in parse_codes(item.get("success_exit_codes", [0])):
                 should_notify = True
                 reason = self._lang["msg_exit_code_detail"] % exit_code
         # 检查快速退出
@@ -6237,7 +6392,7 @@ class BatchManagerApp:
                 "exit_code": exit_code,
                 "duration": duration,
                 "timestamp": datetime.now().isoformat(),
-                "status": "异常退出" if self._current_language == "zh_CN" else "Abnormal Exit",
+                "status": "异常退出" if self._current_language == "zh-CN" else "Abnormal Exit",
             }
         else:
             data = {}
@@ -6286,7 +6441,7 @@ class BatchManagerApp:
         raw = load_config()
         self.items = []
         self._next_id = 1
-        for r in raw:
+        for r in migrate_items(raw):
             path = r.get("path", "")
             # 兼容旧配置：从 is_python 推断 script_type
             stype = r.get("script_type")
@@ -6297,7 +6452,8 @@ class BatchManagerApp:
                     stype = get_script_type(path) or "batch"
             interpreter = r.get("interpreter") or r.get("python_exe") or ""
             self.items.append({
-                "id": self._next_id,
+                "id": r["id"],
+                **{key: r[key] for key in FEATURE_FIELDS if key in r},
                 "name": r.get("name", "未命名"),
                 "path": path,
                 "work_dir": r.get("work_dir") or "",
@@ -6305,12 +6461,12 @@ class BatchManagerApp:
                 "script_type": stype,
                 "interpreter": interpreter,
                 # 兼容旧配置
-                "is_python": bool(r.get("is_python", False)),
+                "is_python": _bool_from_config(r.get("is_python", False)),
                 "python_exe": interpreter if stype == "python" else "",
-                "auto_restart": bool(r.get("auto_restart", False)),
+                "auto_restart": _bool_from_config(r.get("auto_restart", False)),
                 "launch_on_app_start": _bool_from_config(r.get("launch_on_app_start", False)),
-                "log_output": bool(r.get("log_output", False)),
-                "schedule_enabled": bool(r.get("schedule_enabled", False)),
+                "log_output": _bool_from_config(r.get("log_output", False)),
+                "schedule_enabled": _bool_from_config(r.get("schedule_enabled", False)),
                 "schedule_action": r.get("schedule_action", "start"),
                 "schedule_type": r.get("schedule_type", "daily"),
                 "schedule_time": r.get("schedule_time", "09:00"),
@@ -6334,7 +6490,14 @@ class BatchManagerApp:
                 "pid": None,
             })
             self._next_id = max(self._next_id, self.items[-1]["id"]) + 1
-        self._next_id = max(self._next_id, 1)
+        self._next_id = max(self._next_id, next_item_id(self.items))
+        for item in self.items:
+            if item['id'] in getattr(self, '_task_active', {}):
+                run = self._task_active[item['id']]
+                if run.get('path', run['item'].get('path')) == item.get('path'):
+                    item.update(pid=run['process'].pid, _popen=run['process'], pid_set_at=run['start'])
+            if item['id'] in getattr(getattr(self, '_task_queue', None), 'pending', []):
+                item['_queued'] = True
         # 记录配置文件修改时间，用于检测外部变更
         try:
             self._config_mtime = CONFIG_PATH.stat().st_mtime
@@ -6350,13 +6513,13 @@ class BatchManagerApp:
             "powershell": "PowerShell",
             "vbs": "VBScript",
             "jscript": "JScript",
-            "batch": self._lang.get("type_batch", "批处理"),
+            "batch": self._task_text("批处理", "Batch"),
             "shell": "Shell",
             "wsf": "WSF",
             "exe": "EXE",
             "http_get": "HTTP",
-            "process": self._lang.get("type_process", "进程"),
-            "command": self._lang.get("type_command", "命令"),
+            "process": self._task_text("进程", "Process"),
+            "command": self._task_text("命令", "Command"),
             "system_shutdown": self._lang.get("task_type_system_shutdown", "系统关机"),
             "system_reboot": self._lang.get("task_type_system_reboot", "系统重启"),
         }
@@ -6366,7 +6529,7 @@ class BatchManagerApp:
                 stype = "python"
             else:
                 stype = get_script_type(it.get("path", "")) or "batch"
-        typ = type_names.get(stype, self._lang.get("type_batch", "批处理"))
+        typ = type_names.get(stype, self._task_text("批处理", "Batch"))
         pid = it.get("pid")
         pid_set_at = it.get("pid_set_at") or 0
         running = pid and (is_process_running(pid) or (pid_set_at and (time.time() - pid_set_at) < 2))
@@ -6385,6 +6548,10 @@ class BatchManagerApp:
             status = self._lang["status_crash_loop"]
         else:
             status = self._lang["status_running"] if running else (self._lang["status_path_invalid"] if path_invalid else self._lang["status_stopped"])
+        if it.get("_queued"):
+            status = self._task_text("排队中", "Queued")
+        elif not running and it.get("_last_result"):
+            status = it["_last_result"]
         pid_s = str(pid) if pid else "-"
         ports_s = "-"
         title_s = "-"
@@ -6392,51 +6559,37 @@ class BatchManagerApp:
         if it.get("schedule_enabled"):
             schedule_action = it.get("schedule_action", "start")
             _lang = self._lang
-            _is_zh = self._current_language == "zh_CN"
-            action_map = {"start": _lang.get("schedule_action_start", "启动"), "restart": _lang.get("schedule_action_restart", "重启任务"), "stop": _lang.get("schedule_action_stop", "停止")}
+            action_label = _lang.get(f"schedule_action_{schedule_action}", _lang["schedule_action_start"])
             if is_system_power_task(it):
-                action_cn = _lang.get("schedule_action_start", "启动")
-            else:
-                action_cn = action_map.get(schedule_action, schedule_action if schedule_action in action_map.values() else action_map["start"])
+                action_label = _lang["schedule_action_start"]
             schedule_type = it.get("schedule_type", "daily")
-            type_map = {"daily": _lang.get("schedule_daily", "每天"), "hourly": _lang.get("schedule_hourly", "每小时"), "minutely": _lang.get("schedule_minutely", "每分钟"), "weekly": _lang.get("schedule_weekly", "每周"), "monthly": _lang.get("schedule_monthly", "每月"), "every_hours": _lang.get("schedule_every_hours", "每N小时"), "quarterly": _lang.get("schedule_quarterly", "每季度"), "halfyearly": _lang.get("schedule_halfyearly", "每半年"), "yearly": _lang.get("schedule_yearly", "每年"), "once": _lang.get("schedule_once", "单次执行"), "weekday": _lang.get("schedule_weekday_type", "工作日"), "weekend": _lang.get("schedule_weekend", "每周末")}
-            schedule_type_cn = type_map.get(schedule_type, schedule_type)
-            prefix = f"{action_cn}·"
-            if schedule_type_cn == type_map.get("once", "单次执行"):
-                once_date = it.get("schedule_once_date", "") or datetime.now().strftime("%Y-%m-%d")
-                schedule_s = f"{prefix}{type_map['once']} {once_date} {it.get('schedule_time', '09:00')}" if _is_zh else f"{prefix}Once {once_date} {it.get('schedule_time', '09:00')}"
-            elif schedule_type_cn == type_map.get("daily", "每天"):
-                schedule_s = f"{prefix}{type_map['daily']} {it.get('schedule_time', '09:00')}" if _is_zh else f"{prefix}Daily {it.get('schedule_time', '09:00')}"
-            elif schedule_type_cn == type_map.get("weekday_type", "工作日"):
-                schedule_s = f"{prefix}{type_map.get('weekday_type', '工作日')} {it.get('schedule_time', '09:00')}" if _is_zh else f"{prefix}Weekdays {it.get('schedule_time', '09:00')}"
-            elif schedule_type_cn == type_map.get("hourly", "每小时"):
-                schedule_s = f"{prefix}{type_map['hourly']}" if _is_zh else f"{prefix}Hourly"
-            elif schedule_type_cn == type_map.get("minutely", "每分钟"):
+            type_label = _lang.get(f"schedule_type_{schedule_type}", _lang["schedule_type_daily"])
+            schedule_s = f"{action_label} · {type_label}"
+            schedule_time = it.get("schedule_time", "09:00")
+            if schedule_type == "once":
+                date = it.get("schedule_once_date") or datetime.now().strftime("%Y-%m-%d")
+                schedule_s += f" {date} {schedule_time}"
+            elif schedule_type in ("minutely", "every_hours"):
                 interval = it.get("schedule_interval", 5)
-                schedule_s = f"{prefix}每{interval}分钟" if _is_zh else f"{prefix}Every {interval} min"
-            elif schedule_type_cn == type_map.get("every_hours", "每N小时"):
-                interval = it.get("schedule_interval", 1)
-                schedule_s = f"{prefix}每{interval}小时" if _is_zh else f"{prefix}Every {interval}h"
-            elif schedule_type_cn == type_map.get("weekly", "每周"):
-                if _is_zh:
-                    weekday_map = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
-                else:
-                    weekday_map = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
-                weekday = it.get("schedule_weekday", 0)
-                if isinstance(weekday, str) and weekday.isdigit():
-                    weekday = int(weekday)
-                weekday_cn = weekday_map.get(weekday, weekday) if isinstance(weekday, int) else weekday
-                schedule_s = f"{prefix}{weekday_cn} {it.get('schedule_time', '09:00')}"
-            elif schedule_type_cn == type_map.get("monthly", "每月"):
+                unit = self._task_text("分钟", "min") if schedule_type == "minutely" else self._task_text("小时", "h")
+                schedule_s += f" ({interval} {unit})"
+            elif schedule_type == "weekly":
                 try:
-                    day_val = it.get("schedule_day", 1)
-                    if day_val == 31 or day_val == "31":
-                        schedule_s = f"{prefix}每月{_lang.get('schedule_day_last', '月末')} {it.get('schedule_time', '09:00')}" if _is_zh else f"{prefix}Monthly last day {it.get('schedule_time', '09:00')}"
-                    else:
-                        day = max(1, min(30, int(day_val)))
-                        schedule_s = f"{prefix}每月{day}号 {it.get('schedule_time', '09:00')}" if _is_zh else f"{prefix}Monthly day {day} {it.get('schedule_time', '09:00')}"
+                    weekday = int(it.get("schedule_weekday", 0))
                 except (TypeError, ValueError):
-                    schedule_s = f"{prefix}每月1号 {it.get('schedule_time', '09:00')}" if _is_zh else f"{prefix}Monthly day 1 {it.get('schedule_time', '09:00')}"
+                    weekday = 0
+                weekday_keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+                weekday_label = _lang[f"weekday_{weekday_keys[weekday % 7]}"]
+                schedule_s += f" {weekday_label} {schedule_time}"
+            elif schedule_type == "monthly":
+                try:
+                    day = max(1, min(31, int(it.get("schedule_day", 1))))
+                except (TypeError, ValueError):
+                    day = 1
+                day_label = _lang["schedule_day_last"] if day == 31 else str(day)
+                schedule_s += f" {day_label} {schedule_time}"
+            elif schedule_type != "hourly":
+                schedule_s += f" {schedule_time}"
             next_run = self._get_next_schedule_run(it) if it.get("schedule_enabled") else None
             if next_run:
                 schedule_s = schedule_s + " (" + (self._lang["schedule_next_run"] % next_run) + ")"
@@ -6540,7 +6693,7 @@ class BatchManagerApp:
         """按当前分组折叠、分组筛选、关键词过滤，产出 (items索引, item)。"""
         keywords = self._search_keywords()
         filter_group = self.filter_group_var.get()
-        all_text = "全部" if self._current_language == "zh_CN" else "All"
+        all_text = self._task_text("全部", "All")
         for i, it in enumerate(self.items):
             group = it.get("group", "") or "-"
             if group != "-" and group in self._collapsed_groups:
@@ -6584,6 +6737,8 @@ class BatchManagerApp:
     def _apply_search_filter(self):
         self._search_filter_after_id = None
         self._sync_tree()
+        if self._search_keywords():
+            self.tree.yview_moveto(0)
         self._update_search_match_label(update_status=True)
 
     def _on_search_escape(self, event=None):
@@ -6607,7 +6762,7 @@ class BatchManagerApp:
         scoped = 0
         matched = 0
         filter_group = self.filter_group_var.get()
-        all_text = "全部" if self._current_language == "zh_CN" else "All"
+        all_text = self._task_text("全部", "All")
         for it in self.items:
             group = it.get("group", "") or "-"
             if group != "-" and group in self._collapsed_groups:
@@ -6645,7 +6800,9 @@ class BatchManagerApp:
 
         children = self.tree.get_children()
         # 行数变化或强制重建时全量重建
-        if force_rebuild or len(children) != len(visible_items):
+        rebuild = force_rebuild or len(children) != len(visible_items)
+        if rebuild:
+            scroll_position = self.tree.yview()[0]
             for i in self.tree.get_children():
                 self.tree.delete(i)
             for vals in visible_items:
@@ -6669,13 +6826,10 @@ class BatchManagerApp:
             item_id = self._item_id_from_tree_iid(child)
             if item_id in saved_set:
                 to_sel.append(child)
-        if to_sel:
+        if tuple(to_sel) != self.tree.selection():
             self.tree.selection_set(*to_sel)
-            self.tree.see(to_sel[0])
-        elif self._search_keywords() and children:
-            self.tree.see(children[0])
-        elif children:
-            self.tree.see(children[-1])
+        if rebuild and children:
+            self.tree.yview_moveto(scroll_position)
         self._update_visit_button_state()
         self._update_search_match_label(update_status=False)
         # 分组选项随任务总数变化更新，避免关键词过滤时反复重建 combobox
@@ -6686,7 +6840,7 @@ class BatchManagerApp:
     def _update_group_filter_options(self):
         """更新分组筛选下拉框的选项（全部 + 所有分组）。"""
         groups = sorted(set(it.get("group", "") for it in self.items if it.get("group")))
-        all_text = "全部" if self._current_language == "zh_CN" else "All"
+        all_text = self._task_text("全部", "All")
         options = [all_text] + groups
         self.filter_combo["values"] = options
         current = self.filter_group_var.get()
@@ -6728,7 +6882,7 @@ class BatchManagerApp:
 
     def _clear_group_filter(self):
         """清除分组筛选与关键词过滤。"""
-        all_text = "全部" if self._current_language == "zh_CN" else "All"
+        all_text = self._task_text("全部", "All")
         self.filter_group_var.set(all_text)
         if (self.search_keyword_var.get() or "").strip():
             self.search_keyword_var.set("")
@@ -6989,6 +7143,8 @@ class BatchManagerApp:
         self._check_config_changed()
         restarted = None
         for it in self.items:
+            if it.get('_queued') or it.get("id") in getattr(self, "_task_active", {}):
+                continue
             pid = it.get("pid")
             if not pid:
                 continue
@@ -7130,6 +7286,7 @@ class BatchManagerApp:
             self.btn_restart_api.config(state=state)
         if not api_ok:
             self.label_api_status.config(text=self._lang["status_api_missing"], foreground="orange")
+            self._wrap_toolbar_row(self.label_api_status.master)
             return
         if self._api_server_popen is not None:
             try:
@@ -7143,6 +7300,7 @@ class BatchManagerApp:
             self.label_api_status.config(text=self._lang["status_api_running"] % pid_s, foreground="green")
         else:
             self.label_api_status.config(text=self._lang["status_api_stopped"], foreground="gray")
+        self._wrap_toolbar_row(self.label_api_status.master)
 
     def _apply_api_start_result(self, p, set_status: bool = True):
         self._api_server_popen = p
@@ -7170,6 +7328,59 @@ class BatchManagerApp:
                 self.root.after(0, lambda: self._apply_api_start_result(p))
 
         threading.Thread(target=run_in_thread, daemon=True).start()
+
+    def _on_check_api_environment(self):
+        executable = default_python_executable()
+        chinese = self._current_language == "zh-CN"
+        title = self._lang["btn_check_api_env"]
+
+        def offer_download(message):
+            prompt = "打开 Python 官方下载页吗？" if chinese else "Open the official Python download page?"
+            if messagebox.askyesno(title, f"{message}\n\n{prompt}", parent=self.root):
+                webbrowser.open("https://www.python.org/downloads/")
+
+        if not executable:
+            offer_download("未找到系统 Python。" if chinese else "System Python was not found.")
+            return
+
+        results = queue.Queue()
+        self.btn_check_api_env.state(["disabled"])
+
+        def check():
+            try:
+                results.put((probe_api_python(executable), None))
+            except (OSError, subprocess.SubprocessError, ValueError) as exc:
+                results.put((None, exc))
+
+        def show_result():
+            try:
+                info, error = results.get_nowait()
+            except queue.Empty:
+                self.root.after(100, show_result)
+                return
+            self.btn_check_api_env.state(["!disabled"])
+            if error is not None:
+                message = "无法运行检测到的 Python" if chinese else "The detected Python could not run"
+                offer_download(f"{message}\n{executable}\n{error}")
+                return
+            message = f"Python {info['version']}\n{info['executable']}"
+            api_path = get_api_server_script_path()
+            if not api_path:
+                message += "\n\n" + ("缺少 API 服务脚本。" if chinese else "API server script is missing.")
+            if info["missing"]:
+                missing = ", ".join(info["missing"])
+                label = "缺少模块" if chinese else "Missing modules"
+                prefix = "& " if sys.platform == "win32" else ""
+                command = f'{prefix}"{info["executable"]}" -m pip install {" ".join(info["missing"])}'
+                messagebox.showwarning(title, f"{message}\n\n{label}: {missing}\n\n{command}", parent=self.root)
+            elif not api_path:
+                messagebox.showwarning(title, message, parent=self.root)
+            else:
+                modules = "已找到模块：fastapi、uvicorn" if chinese else "Modules found: fastapi, uvicorn"
+                messagebox.showinfo(title, f"{message}\n\n{modules}", parent=self.root)
+
+        threading.Thread(target=check, daemon=True).start()
+        self.root.after(100, show_result)
 
     def _on_start_api(self):
         path = get_api_server_script_path()
@@ -7357,6 +7568,7 @@ class BatchManagerApp:
             if it.get("pid"):
                 running_map[it["id"]] = {
                     "pid": it["pid"],
+                    "path": it.get("path"),
                     "pid_set_at": it.get("pid_set_at"),
                     "_popen": it.get("_popen"),
                     "_log_path": it.get("_log_path"),
@@ -7369,7 +7581,7 @@ class BatchManagerApp:
         # 恢复运行状态
         for it in self.items:
             saved = running_map.get(it["id"])
-            if saved:
+            if saved and saved.get('path') == it.get('path'):
                 it["pid"] = saved["pid"]
                 it["pid_set_at"] = saved["pid_set_at"]
                 it["_popen"] = saved["_popen"]
@@ -7475,7 +7687,7 @@ class BatchManagerApp:
                     once_date = now.date()
                 t = datetime(once_date.year, once_date.month, once_date.day, hour, minute, 0)
                 if t <= now:
-                    return self._lang.get("hint_expired", "已过期") if self._current_language == "zh_CN" else "Expired"
+                    return self._lang["hint_expired"]
                 return t.strftime("%Y-%m-%d %H:%M")
             if st_cn == "每天":
                 t = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -7483,7 +7695,7 @@ class BatchManagerApp:
                     t += timedelta(days=1)
                 if t.date() == now.date():
                     return t.strftime("%H:%M")
-                return (self._lang.get("schedule_next_tomorrow", "明天") if self._current_language == "zh_CN" else "Tomorrow") + " " + t.strftime("%H:%M")
+                return self._lang["schedule_next_tomorrow"] + " " + t.strftime("%H:%M")
             if st_cn == "工作日":
                 t = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 if t <= now:
@@ -7494,7 +7706,7 @@ class BatchManagerApp:
                 if t.date() == now.date():
                     return t.strftime("%H:%M")
                 weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-                wd_name = weekday_names[t.weekday()] if self._current_language == "zh_CN" else t.strftime("%a")
+                wd_name = weekday_names[t.weekday()] if self._current_language == "zh-CN" else t.strftime("%a")
                 return f"{wd_name} {t.strftime('%H:%M')}"
             if st_cn == "每小时":
                 t = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
@@ -8010,6 +8222,7 @@ class BatchManagerApp:
                 self._run_system_power_task(it, trigger="schedule")
             return
         if schedule_action == "stop" or action_cn == "停止":
+            self._cancel_task(it)
             # 定时停止：如果正在运行则停止
             sp = (it.get("path") or "").strip()
             stype = get_script_type(sp)
@@ -8042,6 +8255,7 @@ class BatchManagerApp:
             return
         elif schedule_action == "restart" or action_cn in ("重启", "重启任务"):
             # 定时重启：先停止再启动
+            self._cancel_task(it)
             sp = (it.get("path") or "").strip()
             stype = get_script_type(sp)
             if stype == "process":
@@ -8068,7 +8282,7 @@ class BatchManagerApp:
     def _do_schedule_start(self, it, schedule_action, action_cn, schedule_type):
         """定时任务：实际启动脚本。"""
         p = self._start_single_script(it, trigger="schedule")
-        if p:
+        if p or it.get('_queued'):
             if schedule_type == "单次执行":
                 it["schedule_enabled"] = False
             name = it.get("name", self._lang["default_name"])
@@ -8160,64 +8374,10 @@ class BatchManagerApp:
         messagebox.showinfo(self._lang.get("menu_global_hotkeys", "快捷键说明"), self._lang.get("msg_hotkeys_info", ""), parent=self.root)
 
     def _do_launch_on_start_items(self):
-        """启动所有勾选了「启动本工具时自动启动」的任务。在后台线程执行 Popen，避免阻塞主循环导致子进程延迟或界面不同步。"""
-        to_start = []
         for it in self.items:
-            if not it.get("launch_on_app_start"):
-                continue
-            if it.get("pid") and is_process_running(it["pid"]):
-                continue
-            logpath = self._make_log_path(it)
-            stype = it.get("script_type") or (get_script_type(it.get("path", "")) if it.get("path") else "batch")
-            if not stype or stype == "unknown":
-                if it.get("is_python"):
-                    stype = "python"
-                else:
-                    stype = get_script_type(it.get("path", "")) or "batch"
-            interpreter = it.get("interpreter") or it.get("python_exe") or None
-            extra_args = it.get("args", "") or None
-            to_start.append((it, logpath, stype, interpreter, extra_args))
-        if not to_start:
-            return
-
-        def run_in_thread():
-            results = []
-            # 按依赖拓扑排序
-            dep_order = _get_dep_order([it for it, *_ in to_start])
-            id_to_start = {it.get("id"): (it, logpath, stype, interpreter, extra_args) for it, logpath, stype, interpreter, extra_args in to_start}
-            sorted_items = [id_to_start[iid] for iid in dep_order if iid in id_to_start]
-            # 逐个启动，间隔 1 秒，避免同时创建多个子进程导致 Windows 下部分 Popen 失败
-            for i, (it, logpath, stype, interpreter, extra_args) in enumerate(sorted_items):
-                if i > 0:
-                    time.sleep(1.0)
-                p = None
-                env_vars = it.get("env_vars", "") or None
-                for attempt in range(3):
-                    try:
-                        p = start_script(
-                            it.get("path", ""),
-                            effective_work_dir(it),
-                            stype,
-                            interpreter,
-                            log_path=logpath,
-                            detach_on_windows=True,
-                            extra_args=extra_args,
-                            env_vars=env_vars,
-                            http_method=it.get("http_method"),
-                            http_headers=it.get("http_headers"),
-                        )
-                        if p:
-                            break
-                    except Exception:
-                        pass
-                    if attempt < 2:
-                        time.sleep(0.6)
-                if p:
-                    results.append((it, p, logpath))
-            if results:
-                self.root.after(0, lambda: self._apply_launch_on_start_results(results))
-
-        threading.Thread(target=run_in_thread, daemon=True).start()
+            if it.get("launch_on_app_start"):
+                self._start_single_script(it, trigger="startup")
+        self._sync_tree()
 
     def _apply_launch_on_start_results(self, results):
         """在主线程中应用「启动时自动启动」的结果并刷新界面。"""
@@ -8289,6 +8449,7 @@ class BatchManagerApp:
         interpreter = r.get("interpreter") or r.get("python_exe") or ""
         self.items.append({
             "id": self._next_id,
+            **{key: r[key] for key in FEATURE_FIELDS if key in r},
             "name": r["name"],
             "path": r["path"],
             "work_dir": r["work_dir"],
@@ -8337,21 +8498,21 @@ class BatchManagerApp:
                 ("Python", "*.py"),
                 ("Node.js", "*.js;*.mjs;*.cjs;*.ts;*.jsx;*.tsx"),
                 ("PowerShell", "*.ps1"),
-                ("全部脚本", all_ext) if self._lang == LANGUAGES["zh_CN"] else ("All Scripts", all_ext),
-                ("全部", "*.*") if self._lang == LANGUAGES["zh_CN"] else ("All Files", "*.*"),
+                ("全部脚本", all_ext) if self._lang == LANGUAGES["zh-CN"] else ("All Scripts", all_ext),
+                ("全部", "*.*") if self._lang == LANGUAGES["zh-CN"] else ("All Files", "*.*"),
             ]
         else:
             filetypes = [
-                ("全部脚本", all_ext) if self._lang == LANGUAGES["zh_CN"] else ("All Scripts", all_ext),
-                ("批处理", "*.bat;*.cmd") if self._lang == LANGUAGES["zh_CN"] else ("Batch", "*.bat;*.cmd"),
+                ("全部脚本", all_ext) if self._lang == LANGUAGES["zh-CN"] else ("All Scripts", all_ext),
+                ("批处理", "*.bat;*.cmd") if self._lang == LANGUAGES["zh-CN"] else ("Batch", "*.bat;*.cmd"),
                 ("Python", "*.py"),
                 ("Node.js", "*.js;*.mjs;*.cjs;*.ts;*.jsx;*.tsx"),
                 ("PowerShell", "*.ps1"),
                 ("VBScript", "*.vbs"),
                 ("WSF", "*.wsf"),
                 ("Shell", "*.sh"),
-                ("可执行文件", "*.exe") if self._lang == LANGUAGES["zh_CN"] else ("Executable", "*.exe"),
-                ("全部", "*.*") if self._lang == LANGUAGES["zh_CN"] else ("All Files", "*.*"),
+                ("可执行文件", "*.exe") if self._lang == LANGUAGES["zh-CN"] else ("Executable", "*.exe"),
+                ("全部", "*.*") if self._lang == LANGUAGES["zh-CN"] else ("All Files", "*.*"),
             ]
         path = filedialog.askopenfilename(
             title=self._lang["dialog_select_script"],
@@ -8401,6 +8562,7 @@ class BatchManagerApp:
         interpreter = r.get("interpreter") or r.get("python_exe") or ""
         self.items.append({
             "id": self._next_id,
+            **{key: r[key] for key in FEATURE_FIELDS if key in r},
             "name": r["name"],
             "path": r["path"],
             "work_dir": r["work_dir"],
@@ -8461,6 +8623,7 @@ class BatchManagerApp:
                 stype = get_script_type(it.get("path", "")) or "batch"
         interpreter = it.get("interpreter") or it.get("python_exe") or ""
         initial = {
+            **{key: it[key] for key in FEATURE_FIELDS if key in it},
             "name": it.get("name", ""),
             "path": it.get("path", ""),
             "script_type": stype,
@@ -8511,6 +8674,7 @@ class BatchManagerApp:
         if not getattr(d, "result", None):
             return
         r = d.result
+        it.update({key: r[key] for key in FEATURE_FIELDS if key in r})
         it["name"] = r["name"]
         it["path"] = r["path"]
         it["work_dir"] = r["work_dir"]
@@ -8552,6 +8716,10 @@ class BatchManagerApp:
         if not rows:
             messagebox.showinfo(self._lang["msg_info"], self._lang["msg_select_items"])
             return
+        deleted = {self.items[row]['id'] for row in rows if 0 <= row < len(self.items)}
+        referenced = [item.get('name', '') for item in self.items if item['id'] not in deleted and any(ident in deleted for field in ('depends_on', 'on_success', 'on_failure') for ident in link_ids(item.get(field)))]
+        if referenced and not messagebox.askyesno('清理任务引用 / Remove links', '以下任务引用了所选项，删除将同时清理引用：\n' + '\n'.join(referenced), parent=self.root):
+            return
         # 检查是否有正在运行的项，仅提示（不停止）
         running_names = []
         for r in rows:
@@ -8568,7 +8736,9 @@ class BatchManagerApp:
         # 直接从列表中删除，不停止进程
         for r in rows:
             if 0 <= r < len(self.items):
+                self._cancel_task(self.items[r])
                 self.items.pop(r)
+        self._clean_task_links()
         self._save_config()
         self._sync_tree()
         self.status_var.set(self._lang["status_deleted"])
@@ -8583,7 +8753,9 @@ class BatchManagerApp:
             return
         for r in rows:
             if 0 <= r < len(self.items):
+                self._cancel_task(self.items[r])
                 self.items.pop(r)
+        self._clean_task_links()
         self._save_config()
         self._sync_tree()
         self.status_var.set(self._lang["status_cleared_invalid"] % len(rows))
@@ -8593,6 +8765,8 @@ class BatchManagerApp:
         exited = []  # [(name, duration, rc, logpath, tail_or_none), ...]
         for pid in pids:
             if not pid or is_process_running(pid):
+                continue
+            if any(run['process'].pid == pid for run in getattr(self, '_task_active', {}).values()):
                 continue
             for it in self.items:
                 if it.get("pid") != pid:
@@ -8666,7 +8840,7 @@ class BatchManagerApp:
             self.status_var.set(self._lang["status_power_action_failed"] % action_text)
         return ok
 
-    def _start_single_script(self, it: dict, trigger: str = "manual") -> Optional[subprocess.Popen]:
+    def _launch_single_script(self, it: dict, trigger: str = "manual") -> Optional[subprocess.Popen]:
         """启动单个脚本（内部方法），处理类型推断、日志、参数、依赖链。trigger: 'manual' 或 'schedule'。"""
         if is_system_power_task(it):
             schedule_action = it.get("schedule_action", "start")
@@ -8684,7 +8858,7 @@ class BatchManagerApp:
                 stype = get_script_type(it.get("path", "")) or "batch"
         interpreter = it.get("interpreter") or it.get("python_exe") or None
         extra_args = it.get("args", "") or None
-        env_vars = it.get("env_vars", "") or None
+        env_vars = environment_vars(it) or None
         p = start_script(
             it.get("path", ""),
             effective_work_dir(it),
@@ -8695,6 +8869,7 @@ class BatchManagerApp:
             env_vars=env_vars,
             http_method=it.get("http_method"),
             http_headers=it.get("http_headers"),
+            capture_http=True,
         )
         if p:
             it["pid"] = p.pid
@@ -8714,79 +8889,15 @@ class BatchManagerApp:
         if not rows:
             messagebox.showinfo(self._lang["msg_info"], self._lang["msg_select_items"])
             return
-        started_pids = []
-        # 检查循环依赖
-        for r in rows:
-            it = self._item_at(r)
-            if not it:
-                continue
-            cycle = _check_circular_deps(self.items, it.get("id"))
-            if cycle:
-                messagebox.showwarning(self._lang["msg_error"], self._lang["msg_dep_circular"] % cycle)
-                return
-        # 按依赖拓扑排序后启动
-        for r in rows:
-            it = self._item_at(r)
-            if not it:
-                continue
-            if it.get("pid") and is_process_running(it["pid"]):
-                self.status_var.set(self._lang["status_script_running"] % it.get('name'))
-                continue
-            # 检查依赖是否运行
-            dep_str = (it.get("depends_on") or "").strip()
-            if dep_str and not _are_deps_running(it, self.items):
-                # 尝试先启动依赖
-                id_map = {it2.get("id"): it2 for it2 in self.items}
-                deps_started = False
-                for dep_id_str in dep_str.split(","):
-                    dep_id_str = dep_id_str.strip()
-                    if dep_id_str.isdigit():
-                        dep_id = int(dep_id_str)
-                        dep_item = id_map.get(dep_id)
-                        if dep_item and (not dep_item.get("pid") or not is_process_running(dep_item.get("pid"))):
-                            dp = self._start_single_script(dep_item)
-                            if dp:
-                                deps_started = True
-                                started_pids.append(dp.pid)
-                                delay = dep_item.get("delay_after_dep", 0)
-                                if delay > 0:
-                                    time.sleep(min(delay, 30))
-                            else:
-                                dep_name = dep_item.get("name", str(dep_id)) if dep_item else str(dep_id)
-                                self.status_var.set(self._lang["msg_dep_not_running"] % (dep_id, dep_name, it.get("name")))
-                                continue
-                # 再检查一次
-                if not _are_deps_running(it, self.items):
-                    dep_name_parts = []
-                    for dep_id_str in dep_str.split(","):
-                        dep_id_str = dep_id_str.strip()
-                        if dep_id_str.isdigit():
-                            dep_item = id_map.get(int(dep_id_str))
-                            dep_name_parts.append(dep_item.get("name", dep_id_str) if dep_item else dep_id_str)
-                    self.status_var.set(self._lang["msg_dep_not_running"] % (dep_str, ", ".join(dep_name_parts), it.get("name")))
-                    continue
-                # 依赖延迟
-                delay = it.get("delay_after_dep", 0)
-                if isinstance(delay, (int, float)) and delay > 0:
-                    self.status_var.set(self._lang["msg_dep_starting"])
-                    self.root.update_idletasks()
-                    time.sleep(min(delay, 30))
-            p = self._start_single_script(it)
-            if p:
-                started_pids.append(p.pid)
-                self.status_var.set(self._lang["msg_started"] % (it.get('name'), p.pid))
-            else:
-                reason = get_last_start_error() or it.get("path", "")
-                diag = diagnose_start_item(it)
-                short = reason
-                for line in diag.splitlines():
-                    if line.startswith("issue:") or line.startswith("last_error:"):
-                        short = line.split(":", 1)[-1].strip() or short
-                        break
-                self.status_var.set(self._lang["msg_start_failed"] % short)
+        for row in rows:
+            item = self._item_at(row)
+            if item:
+                process = self._start_single_script(item)
+                if process:
+                    self.status_var.set(self._lang["msg_started"] % (item.get('name'), process.pid))
+                elif item.get('_queued'):
+                    self.status_var.set(self._task_text("已加入队列", "Queued") + ": " + item.get("name", ""))
         self._sync_tree()
-        if started_pids:
-            self.root.after(1500, lambda pids=started_pids: self._check_quick_exit(*pids))
 
     def _on_diagnose_item(self, it: dict):
         text = diagnose_start_item(it)
@@ -8816,6 +8927,10 @@ class BatchManagerApp:
 
     def _on_stop(self):
         rows = self._get_selected_rows()
+        for row in rows:
+            item = self._item_at(row)
+            if item:
+                self._cancel_task(item)
         if not rows:
             messagebox.showinfo(self._lang["msg_info"], self._lang["msg_select_items"])
             return
@@ -8894,34 +9009,15 @@ class BatchManagerApp:
         self._on_start()
 
     def _on_start_all(self):
-        n = 0
-        started_pids = []
-        # 按依赖拓扑排序启动
-        dep_order = _get_dep_order(self.items)
-        id_map = {it.get("id"): it for it in self.items}
-        for iid in dep_order:
-            it = id_map.get(iid)
-            if not it:
-                continue
-            if it.get("pid") and is_process_running(it["pid"]):
-                continue
-            # 检查依赖是否已运行
-            dep_str = (it.get("depends_on") or "").strip()
-            if dep_str and not _are_deps_running(it, self.items):
-                continue
-            p = self._start_single_script(it)
-            if p:
-                n += 1
-                started_pids.append(p.pid)
-                delay = it.get("delay_after_dep", 0)
-                if isinstance(delay, (int, float)) and delay > 0:
-                    time.sleep(min(delay, 30))
+        for item in self.items:
+            self._start_single_script(item)
         self._sync_tree()
-        self.status_var.set(self._lang["msg_start_all"] % n)
-        if started_pids:
-            self.root.after(1500, lambda pids=started_pids: self._check_quick_exit(*pids))
+        self.status_var.set(self._task_text("已提交全部任务", "All tasks submitted"))
 
     def _on_stop_all(self, skip_whitelist: bool = False):
+        for item in self.items:
+            if not (skip_whitelist and is_service_whitelisted(item.get('path', ''))):
+                self._cancel_task(item)
         n = 0
         failed = 0
         skipped = 0
@@ -9088,6 +9184,7 @@ class BatchManagerApp:
         n = 0
         for it in self.items:
             if it.get("group") == group:
+                self._cancel_task(it)
                 pid = it.get("pid")
                 if not pid or not is_process_running(pid):
                     continue
@@ -9166,6 +9263,7 @@ class BatchManagerApp:
             interpreter = it.get("interpreter") or it.get("python_exe") or ""
             self.items.append({
                 "id": self._next_id,
+                **{key: it[key] for key in FEATURE_FIELDS if key in it},
                 "name": (it.get("name", "") or "未命名") + "(副本)",
                 "path": it.get("path", ""),
                 "work_dir": it.get("work_dir") or "",
@@ -9409,164 +9507,35 @@ class BatchManagerApp:
                 ttk.Button(btn_frame, text=":%s" % p, command=lambda _p=p: self._on_visit_port(_p)).pack(side=tk.LEFT, padx=2)
 
     def _on_export_config(self):
-        """导出配置到文件，便于备份或迁移。"""
-        path = filedialog.asksaveasfilename(
-            title=self._lang["dialog_export_config"],
-            defaultextension=".json",
-            filetypes=[("JSON", "*.json"), (self._lang.get("filetype_all", "All"), "*.*")],
-            initialfile="batmanager_config_backup.json",
-        )
+        path = filedialog.asksaveasfilename(parent=self.root, title=self._lang['dialog_export_config'], defaultextension='.json', filetypes=[('JSON', '*.json')])
         if not path:
             return
         try:
-            arr = []
-            for it in self.items:
-                stype = it.get("script_type") or (get_script_type(it.get("path", "")) if it.get("path") else "batch")
-                # 兼容旧配置：从 is_python 推断
-                if not stype or stype == "unknown":
-                    if it.get("is_python"):
-                        stype = "python"
-                    else:
-                        stype = get_script_type(it.get("path", "")) or "batch"
-                interpreter = it.get("interpreter") or it.get("python_exe") or ""
-                arr.append({
-                    "name": it.get("name", ""),
-                    "path": it.get("path", ""),
-                    "work_dir": it.get("work_dir") or "",
-                    "group": it.get("group", ""),
-                    "script_type": stype,
-                    "interpreter": interpreter,
-                    # 兼容旧配置
-                    "is_python": bool(it.get("is_python", False)) or (stype == "python"),
-                    "python_exe": interpreter if stype == "python" else "",
-                    "auto_restart": it.get("auto_restart", False),
-                    "launch_on_app_start": it.get("launch_on_app_start", False),
-                    "log_output": it.get("log_output", False),
-                    "schedule_enabled": it.get("schedule_enabled", False),
-                    "schedule_action": it.get("schedule_action", "start"),
-                    "schedule_type": it.get("schedule_type", "daily"),
-                    "schedule_time": it.get("schedule_time", "09:00"),
-                    "schedule_interval": it.get("schedule_interval", 5),
-                    "schedule_weekday": it.get("schedule_weekday", 0),
-                    "schedule_day": it.get("schedule_day", 1),
-                    "schedule_quarter": it.get("schedule_quarter", "q1"),
-                    "schedule_month": it.get("schedule_month", 1),
-                    "schedule_after_at": it.get("schedule_after_at"),
-                    "schedule_once_date": it.get("schedule_once_date", ""),
-                    "depends_on": it.get("depends_on", ""),
-                    "delay_after_dep": it.get("delay_after_dep", 0),
-                    "args": it.get("args", ""),
-                    "env_vars": it.get("env_vars", ""),
-                    "startup_timeout": it.get("startup_timeout", 0),
-                    "schedule_valid_from": it.get("schedule_valid_from", ""),
-                    "schedule_valid_until": it.get("schedule_valid_until", ""),
-                    "schedule_max_runs": it.get("schedule_max_runs", 0),
-                    "schedule_pre_delay": it.get("schedule_pre_delay", 0),
-                })
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(arr, f, ensure_ascii=False, indent=2)
-            self.status_var.set(self._lang["msg_export_to"] % path)
-            messagebox.showinfo(self._lang["msg_success"], self._lang["msg_export_success"] % path)
-        except Exception as e:
-            messagebox.showerror(self._lang["msg_failed"], self._lang["msg_export_failed"] % str(e))
+            Path(path).write_text(json.dumps([config_item_to_save(i) for i in self.items], ensure_ascii=False, indent=2), encoding='utf-8')
+            self.status_var.set(self._lang['msg_export_to'] % path)
+        except Exception as exc:
+            messagebox.showerror(self._lang['msg_failed'], str(exc), parent=self.root)
 
     def _on_import_config(self):
-        """从文件导入配置，可选择合并或替换。"""
-        path = filedialog.askopenfilename(
-            title=self._lang["dialog_import_config"],
-            filetypes=[("JSON", "*.json"), (self._lang.get("filetype_all", "All"), "*.*")],
-        )
+        path = filedialog.askopenfilename(parent=self.root, title=self._lang['dialog_import_config'], filetypes=[('JSON', '*.json')])
         if not path:
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                imported = json.load(f)
-            if not isinstance(imported, list):
-                messagebox.showerror(self._lang["msg_failed"], self._lang["msg_import_failed_format"])
+            incoming = json.loads(Path(path).read_text(encoding='utf-8'))
+            if not isinstance(incoming, list) or any(not isinstance(i, dict) for i in incoming):
+                raise ValueError('配置必须为任务列表 / Expected task list')
+            mode = messagebox.askyesnocancel(self._lang['msg_import_way'], self._lang['msg_import_merge'] + self._lang['msg_import_replace'], parent=self.root)
+            if mode is None:
                 return
-            if not imported:
-                messagebox.showinfo(self._lang["msg_info"], self._lang["msg_import_empty"])
-                return
-            action = messagebox.askyesnocancel(
-                self._lang["msg_import_way"],
-                self._lang["msg_import_found"] % len(imported) +
-                self._lang["msg_import_merge"] +
-                self._lang["msg_import_replace"] +
-                self._lang["msg_import_cancel"],
-            )
-            if action is None:
-                return
-            existing_paths = {it.get("path", "") for it in self.items}
-            added, skipped = 0, 0
-            if not action:
-                self.items = []
-                self._next_id = 1
-            for r in imported:
-                path_val = r.get("path", "").strip()
-                if not path_val:
-                    continue
-                if action and path_val in existing_paths:
-                    skipped += 1
-                    continue
-                stype = r.get("script_type") or (get_script_type(path_val) if path_val else "batch")
-                if not stype or stype == "unknown":
-                    if r.get("is_python"):
-                        stype = "python"
-                    else:
-                        stype = get_script_type(path_val) or "batch"
-                interpreter = r.get("interpreter") or r.get("python_exe") or ""
-                self.items.append({
-                    "id": self._next_id,
-                    "name": r.get("name", "未命名"),
-                    "path": path_val,
-                    "work_dir": r.get("work_dir") or "",
-                    "group": r.get("group", ""),
-                    "script_type": stype,
-                    "interpreter": interpreter,
-                    "is_python": stype == "python",
-                    "python_exe": interpreter if stype == "python" else "",
-                    "auto_restart": bool(r.get("auto_restart", False)),
-                    "launch_on_app_start": bool(r.get("launch_on_app_start", False)),
-                    "log_output": bool(r.get("log_output", False)),
-                    "schedule_enabled": bool(r.get("schedule_enabled", False)),
-                    "schedule_action": r.get("schedule_action", "start"),
-                    "schedule_type": r.get("schedule_type", "daily"),
-                    "schedule_time": r.get("schedule_time", "09:00"),
-                    "schedule_interval": r.get("schedule_interval", 5),
-                    "schedule_weekday": r.get("schedule_weekday", 0),
-                    "schedule_day": r.get("schedule_day", 1),
-                    "schedule_quarter": r.get("schedule_quarter", "q1"),
-                    "schedule_month": r.get("schedule_month", 1),
-                    "schedule_once_date": r.get("schedule_once_date", ""),
-                    "schedule_after_at": r.get("schedule_after_at"),
-                    "depends_on": r.get("depends_on", ""),
-                    "delay_after_dep": r.get("delay_after_dep", 0),
-                    "args": r.get("args", ""),
-                    "env_vars": r.get("env_vars", ""),
-                    "http_method": r.get("http_method") or "GET",
-                    "http_headers": r.get("http_headers") or "",
-                    "startup_timeout": r.get("startup_timeout", 0),
-                    "schedule_valid_from": r.get("schedule_valid_from", ""),
-                    "schedule_valid_until": r.get("schedule_valid_until", ""),
-                    "schedule_max_runs": r.get("schedule_max_runs", 0),
-                    "schedule_pre_delay": r.get("schedule_pre_delay", 0),
-                    "pid": None,
-                })
-                self._next_id += 1
-                added += 1
-                existing_paths.add(path_val)
-            self._save_config()
+            merged = merge_task_items([config_item_to_save(i) for i in self.items], incoming, replace=not mode)
+            if not save_config([config_item_to_save(i) for i in merged]):
+                raise OSError('无法保存配置 / Failed to save configuration')
+            self._load_config()
+            self._next_id = next_item_id(self.items)
             self._sync_tree()
-            msg = self._lang["msg_imported"] % added
-            if skipped:
-                msg += self._lang["msg_import_skipped_detail"] % skipped
-            self.status_var.set(self._lang["status_import_prefix"] + msg)
-            skipped_msg = (self._lang["msg_skipped_paths"] % skipped) if skipped else ""
-            messagebox.showinfo(self._lang["msg_import_complete_title"], msg + skipped_msg)
-        except json.JSONDecodeError as e:
-            messagebox.showerror(self._lang["msg_failed"], self._lang["msg_import_json_error"] % str(e))
-        except Exception as e:
-            messagebox.showerror(self._lang["msg_failed"], self._lang["msg_import_error"] % str(e))
+        except Exception as exc:
+            messagebox.showerror(self._lang['msg_failed'], str(exc), parent=self.root)
+
 
     def _on_scan_running(self):
         """打开「自动识别」窗口：识别系统当前运行中的批处理/Python 进程，可全部加入或选中的加入。"""
@@ -9850,7 +9819,7 @@ class BatchManagerApp:
             self.root.update()  # 确保剪贴板更新
             # 临时显示提示
             original_text = self.ip_label.cget("text")
-            copied_text = "已复制!" if self._current_language == "zh_CN" else "Copied!"
+            copied_text = "已复制!" if self._current_language == "zh-CN" else "Copied!"
             self.ip_label.config(text=copied_text, foreground="green")
             self.root.after(1000, lambda: self.ip_label.config(text=original_text, foreground="blue"))
             self.status_var.set(self._lang["msg_ip_copied"] % ip)
@@ -9906,7 +9875,7 @@ class BatchManagerApp:
             self.root.update()  # 确保剪贴板更新
             # 临时显示提示
             original_text = self.public_ip_label.cget("text")
-            copied_text = "已复制!" if self._current_language == "zh_CN" else "Copied!"
+            copied_text = "已复制!" if self._current_language == "zh-CN" else "Copied!"
             self.public_ip_label.config(text=copied_text, foreground="green")
             self.root.after(1000, lambda: self._restore_public_ip_label(original_text))
             self.status_var.set(self._lang["msg_ip_copied"] % ip_text)
@@ -9940,7 +9909,7 @@ class BatchManagerApp:
             self.public_ip_label.config(foreground="blue")
 
     def _start_ip_load_threads(self):
-        """在主循环已启动后调用，异步加载本地 IP 与外网 IP，避免子线程里 root.after 报 main thread is not in main loop。"""
+        """在主循环已启动后调用，异步加载公网和局域网 IP，避免子线程里 root.after 报 main thread is not in main loop。"""
         threading.Thread(target=self._load_local_ip, daemon=True).start()
         threading.Thread(target=self._load_public_ip, daemon=True).start()
 
@@ -9959,6 +9928,9 @@ class BatchManagerApp:
 
     def _quit_app(self):
         """退出应用，不杀运行中的子进程（子进程独立运行）。"""
+        self._task_closing = True
+        if hasattr(self, '_task_queue'):
+            self._task_queue.pending.clear()
         self._remove_tray_icon()
         self.root.quit()
 
@@ -10106,7 +10078,7 @@ class BatchManagerApp:
             import subprocess
             if getattr(sys, 'frozen', False):
                 # PyInstaller 打包的 exe
-                subprocess.Popen([sys.executable])
+                subprocess.Popen([sys.executable], env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
             else:
                 # Python 脚本
                 subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:])
@@ -10138,6 +10110,7 @@ class BatchManagerApp:
             messagebox.showerror(self._lang["msg_error"], self._lang["status_power_action_failed"] % self._lang["btn_reboot"])
 
     def run(self):
+        self._init_task_features()
         if self._should_start_minimized():
             self.root.after(400, self._minimize_main_window)
         self.root.after(0, self._start_ip_load_threads)  # 主循环启动后立即调度，再启动 IP 加载线程
@@ -10154,11 +10127,15 @@ def cli_main(argv=None) -> int:
     def _items():
         raw = load_config()
         out = []
-        for i, r in enumerate(raw):
+        for i, r in enumerate(migrate_items(raw)):
             path = r.get("path", "")
             stype = r.get("script_type") or ("python" if r.get("is_python") else (get_script_type(path) or "batch"))
             interp = r.get("interpreter") or r.get("python_exe") or ""
-            out.append({"id": i + 1, "name": r.get("name", "未命名"), "path": path, "work_dir": r.get("work_dir") or "", "group": r.get("group", ""), "script_type": stype, "interpreter": interp, "is_python": stype == "python", "python_exe": interp if stype == "python" else "", "auto_restart": bool(r.get("auto_restart", False)), "log_output": bool(r.get("log_output", False)), "http_method": r.get("http_method") or "GET", "http_headers": r.get("http_headers") or ""})
+            item = config_item_to_save(r)
+            item.update(id=r["id"], name=r.get("name", "未命名"), script_type=stype,
+                        interpreter=interp, is_python=stype == "python",
+                        python_exe=interp if stype == "python" else "")
+            out.append(item)
         return out
 
     def _running_map(force=False):
@@ -10236,8 +10213,11 @@ def cli_main(argv=None) -> int:
     ap.add_argument("--no-auto-restart", action="store_true")
     ap.add_argument("--log-output", action="store_true")
     ap.add_argument("--no-log-output", action="store_true")
+    ap.add_argument("--success-exit-codes", default=None)
+    ap.add_argument("--on-success", default=None)
+    ap.add_argument("--on-failure", default=None)
     ap.add_argument("--depends-on", default=None, help="Comma-separated dependency IDs")
-    ap.add_argument("--delay-after-dep", type=int, default=0, help="Seconds to wait after deps start")
+    ap.add_argument("--delay-after-dep", type=int, default=None, help="Seconds to wait after deps start")
     ap.add_argument("--args", default=None, help="Extra arguments for script")
     ap.add_argument("--env-vars", default=None, help="Environment variables (one KEY=VALUE per line)")
     # 定时任务参数
@@ -10255,6 +10235,10 @@ def cli_main(argv=None) -> int:
     ap.add_argument("--import", dest="import_", metavar="F")
     ap.add_argument("--replace", action="store_true")
     args = ap.parse_args(argv)
+    if args.json and argv is None:
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None and hasattr(stream, "reconfigure") and not stream.isatty():
+                stream.reconfigure(encoding="utf-8")
 
     if args.config_path:
         print(CONFIG_PATH.resolve())
@@ -10306,30 +10290,14 @@ def cli_main(argv=None) -> int:
         except Exception as e:
             print("Import error:", e, file=sys.stderr)
             return 1
-        if args.replace:
-            arr = []
-            for r in new_items:
-                if not isinstance(r, dict):
-                    continue
-                path_s = r.get("path", "")
-                stype = r.get("script_type") or ("python" if r.get("is_python") else (get_script_type(path_s) or "batch"))
-                interp = r.get("interpreter") or r.get("python_exe") or ""
-                arr.append({"name": r.get("name", ""), "path": path_s, "work_dir": r.get("work_dir") or "", "group": r.get("group", ""), "script_type": stype, "interpreter": interp, "is_python": stype == "python", "python_exe": interp if stype == "python" else "", "auto_restart": bool(r.get("auto_restart", False)), "launch_on_app_start": bool(r.get("launch_on_app_start", False)), "log_output": bool(r.get("log_output", False)), "schedule_enabled": False, "schedule_action": "start", "schedule_type": "daily", "schedule_time": "09:00", "schedule_interval": 5, "schedule_weekday": 0, "schedule_day": 1, "schedule_quarter": "q1", "schedule_month": 1})
-            save_config(arr)
-            return 0
-        cur = load_config()
-        seen = {os.path.normcase(os.path.abspath((r.get("path") or "").strip())) for r in cur}
-        merged = list(cur)
-        for r in new_items:
-            if not isinstance(r, dict):
-                continue
-            p = (r.get("path") or "").strip()
-            if p and os.path.normcase(os.path.abspath(p)) not in seen:
-                merged.append(r)
-                seen.add(os.path.normcase(os.path.abspath(p)))
-        save_config(merged)
-        if not args.json:
-            print("Merged; total:", len(merged))
+        try:
+            merged = merge_task_items(load_config(), new_items, replace=args.replace)
+        except (ValueError, TypeError, KeyError) as exc:
+            print('Import error:', exc, file=sys.stderr)
+            return 1
+        if not save_config([config_item_to_save(i) for i in merged]):
+            print('Failed to save configuration', file=sys.stderr)
+            return 1
         return 0
 
     if args.delete:
@@ -10343,7 +10311,13 @@ def cli_main(argv=None) -> int:
             for px in get_process_tree_pids(pid):
                 kill_process(px)
         new_items = [x for x in items if x.get("id") != it.get("id")]
-        save_config(_to_save(new_items))
+        for item in new_items:
+            for field in ('on_success', 'on_failure'):
+                item[field] = [ident for ident in link_ids(item.get(field)) if ident != it['id']]
+            item['depends_on'] = ','.join(str(ident) for ident in link_ids(item.get('depends_on')) if ident != it['id'])
+        if not save_config(_to_save(new_items)):
+            print("Failed to save configuration", file=sys.stderr)
+            return 1
         return 0
 
     if args.update:
@@ -10399,8 +10373,21 @@ def cli_main(argv=None) -> int:
             updated["schedule_day"] = args.schedule_day
         if args.schedule_once_date is not None:
             updated["schedule_once_date"] = args.schedule_once_date
+        try:
+            if args.success_exit_codes is not None:
+                updated["success_exit_codes"] = parse_codes(args.success_exit_codes)
+            if args.on_success is not None:
+                updated["on_success"] = link_ids(args.on_success)
+            if args.on_failure is not None:
+                updated["on_failure"] = link_ids(args.on_failure)
+            validate_links([updated if x.get("id") == it.get("id") else x for x in items])
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         new_list = [updated if x.get("id") == it.get("id") else x for x in items]
-        save_config(_to_save(new_list))
+        if not save_config(_to_save(new_list)):
+            print("Failed to save configuration", file=sys.stderr)
+            return 1
         if args.json:
             print(json.dumps({"ok": True, "id": it["id"], "name": updated.get("name")}, ensure_ascii=False))
         else:
@@ -10417,8 +10404,16 @@ def cli_main(argv=None) -> int:
         interp = (args.interpreter or "").strip() if args.interpreter is not None else ""
         new_item = {"name": name, "path": path, "work_dir": (args.work_dir or "").strip() if args.work_dir is not None else "", "group": (args.group or "").strip() if args.group is not None else "", "script_type": stype, "interpreter": interp, "is_python": stype == "python", "python_exe": interp if stype == "python" else "", "auto_restart": bool(args.auto_restart), "launch_on_app_start": False, "log_output": bool(args.log_output), "schedule_enabled": args.schedule_enabled if args.schedule_enabled is not None else False, "schedule_action": args.schedule_action or "start", "schedule_type": args.schedule_type or "daily", "schedule_time": args.schedule_time or "09:00", "schedule_interval": args.schedule_interval if args.schedule_interval is not None else 5, "schedule_weekday": args.schedule_weekday if args.schedule_weekday is not None else 0, "schedule_day": args.schedule_day if args.schedule_day is not None else 1, "schedule_quarter": "q1", "schedule_month": 1, "schedule_once_date": args.schedule_once_date or "", "depends_on": args.depends_on or "", "delay_after_dep": args.delay_after_dep or 0, "args": args.args or "", "env_vars": (args.env_vars or "") if args.env_vars is not None else ""}
         new_id = next_item_id(items)
+        try:
+            new_item.update(success_exit_codes=parse_codes(args.success_exit_codes or "0"), on_success=link_ids(args.on_success), on_failure=link_ids(args.on_failure))
+            validate_links(items + [{**new_item, "id": new_id}])
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         items.append({**new_item, "id": new_id})
-        save_config(_to_save(items))
+        if not save_config(_to_save(items)):
+            print("Failed to save configuration", file=sys.stderr)
+            return 1
         if args.json:
             print(json.dumps({"ok": True, "id": new_id, "name": name}, ensure_ascii=False))
         else:
@@ -10430,7 +10425,7 @@ def cli_main(argv=None) -> int:
         for it in items:
             abs_path = resolve_script_file_path(it)
             pid = run_map.get(os.path.normcase(abs_path))
-            out.append({"id": it["id"], "name": it.get("name", ""), "group": it.get("group", ""), "path": it.get("path", ""), "running": pid is not None, "pid": pid, "script_type": it.get("script_type", "batch"), "schedule_enabled": it.get("schedule_enabled", False), "schedule_action": it.get("schedule_action", "start"), "schedule_type": it.get("schedule_type", "daily"), "schedule_time": it.get("schedule_time", "09:00"), "schedule_interval": it.get("schedule_interval", 5), "schedule_weekday": it.get("schedule_weekday", 0), "schedule_day": it.get("schedule_day", 1), "schedule_once_date": it.get("schedule_once_date", "")})
+            out.append({**{key: it[key] for key in FEATURE_FIELDS if key in it}, "id": it["id"], "name": it.get("name", ""), "group": it.get("group", ""), "path": it.get("path", ""), "running": pid is not None, "pid": pid, "script_type": it.get("script_type", "batch"), "schedule_enabled": it.get("schedule_enabled", False), "schedule_action": it.get("schedule_action", "start"), "schedule_type": it.get("schedule_type", "daily"), "schedule_time": it.get("schedule_time", "09:00"), "schedule_interval": it.get("schedule_interval", 5), "schedule_weekday": it.get("schedule_weekday", 0), "schedule_day": it.get("schedule_day", 1), "schedule_once_date": it.get("schedule_once_date", "")})
         if args.json:
             print(json.dumps(out, ensure_ascii=False, indent=2))
         else:
@@ -10469,9 +10464,9 @@ def cli_main(argv=None) -> int:
             else:
                 print("Already running id=%s pid=%s" % (it["id"], run_map.get(os.path.normcase(abs_path))))
             return 0
-        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
+        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=environment_vars(it) or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
         if not p:
-            print("Start failed", file=sys.stderr)
+            print("Start failed: " + (get_last_start_error() or "could not launch task"), file=sys.stderr)
             return 1
         if args.json:
             print(json.dumps({"ok": True, "id": it["id"], "name": it.get("name"), "pid": p.pid}, ensure_ascii=False))
@@ -10509,7 +10504,7 @@ def cli_main(argv=None) -> int:
             for px in get_process_tree_pids(pid):
                 kill_process(px)
             time.sleep(0.5)
-        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
+        p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=environment_vars(it) or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
         if not p:
             print("Restart failed", file=sys.stderr)
             return 1
@@ -10525,7 +10520,7 @@ def cli_main(argv=None) -> int:
             abs_path = resolve_script_file_path(it)
             if run_map.get(os.path.normcase(abs_path)):
                 continue
-            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
+            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=environment_vars(it) or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
             if p:
                 started.append({"id": it["id"], "name": it.get("name"), "pid": p.pid})
                 run_map[os.path.normcase(abs_path)] = p.pid
@@ -10574,7 +10569,7 @@ def cli_main(argv=None) -> int:
                 continue
             if run_map.get(os.path.normcase(abs_path)):
                 continue
-            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=it.get("env_vars") or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
+            p = start_script(it.get("path", ""), effective_work_dir(it), it.get("script_type", "batch"), it.get("interpreter") or None, log_path=_log_path(it), extra_args=it.get("args") or None, env_vars=environment_vars(it) or None, http_method=it.get("http_method"), http_headers=it.get("http_headers"))
             if p:
                 started.append({"id": it["id"], "name": it.get("name"), "pid": p.pid})
                 run_map[os.path.normcase(abs_path)] = p.pid

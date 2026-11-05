@@ -2,11 +2,13 @@
 """PyInstaller spec for WindowsBatchScriptManager GUI exe (不含 FastAPI/uvicorn)。"""
 import os
 import sys
+from ui_language import LOCALE_MODULES
 
 # 嵌套平台目录已清理，无需再放大递归深度
 ROOT = os.path.dirname(os.path.abspath(SPEC))
 ICON = os.path.join(ROOT, "tray_icon_5728293646040626821.ico")
 DATAS = [(ICON, ".")] if os.path.isfile(ICON) else []
+ONEFILE = os.environ.get("WBSM_ONEFILE") == "1"
 
 EXCLUDES = [
     "win32com", "pythoncom", "pywintypes", "win32api", "win32gui", "win32con",
@@ -23,7 +25,7 @@ a = Analysis(
     pathex=[ROOT],
     binaries=[],
     datas=DATAS,
-    hiddenimports=["psutil"],
+    hiddenimports=["psutil", *LOCALE_MODULES.values()],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -36,14 +38,15 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    a.binaries if ONEFILE else [],
+    a.datas if ONEFILE else [],
     [],
     name="WindowsBatchScriptManager",
+    exclude_binaries=not ONEFILE,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -54,3 +57,9 @@ exe = EXE(
     entitlements_file=None,
     icon=[ICON] if os.path.isfile(ICON) else None,
 )
+
+if not ONEFILE:
+    coll = COLLECT(
+        exe, a.binaries, a.datas,
+        strip=False, upx=False, name="WindowsBatchScriptManager",
+    )
