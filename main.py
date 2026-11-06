@@ -2100,6 +2100,32 @@ def is_process_name_str(path: str) -> bool:
     return not os.path.isfile(p)
 
 
+_child_launch_lock = threading.Lock()
+
+
+def launch_child_process(*args, **kwargs) -> subprocess.Popen:
+    """Keep external processes from inheriting the frozen app's DLL directory."""
+    if sys.platform != "win32" or not getattr(sys, "_MEIPASS", None):
+        return subprocess.Popen(*args, **kwargs)
+
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    set_directory = kernel32.SetDllDirectoryW
+    set_directory.argtypes = [ctypes.c_wchar_p]
+    with _child_launch_lock:
+        previous = ctypes.create_unicode_buffer(32768)
+        length = kernel32.GetDllDirectoryW(len(previous), previous)
+        if not length:
+            return subprocess.Popen(*args, **kwargs)
+        if not set_directory(None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return subprocess.Popen(*args, **kwargs)
+        finally:
+            set_directory(previous.value)
+
+
 def start_process_by_name(name: str, work_dir: Optional[str] = None) -> Optional[subprocess.Popen]:
     """按进程名启动程序。返回 Popen 对象或 None。"""
     name = name.strip()
@@ -2107,7 +2133,7 @@ def start_process_by_name(name: str, work_dir: Optional[str] = None) -> Optional
         return None
     try:
         cwd = work_dir if work_dir and os.path.isdir(work_dir) else None
-        return subprocess.Popen([name], cwd=cwd, shell=False,
+        return launch_child_process([name], cwd=cwd, shell=False,
                                 creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
     except Exception as e:
         print(f"[Process] 启动进程失败: {name}, 错误: {e}")
@@ -2785,6 +2811,40 @@ def build_http_request_curl_args(curl_exe: str, url: str, method=None, headers_r
     return args
 
 
+def _run_http_worker() -> int:
+    """Run an HTTP task using the interpreter bundled with the application."""
+    try:
+        request_data = json.load(sys.stdin)
+        method = request_data["method"]
+        request = Request(
+            request_data["url"], method=method,
+            headers=dict(request_data["headers"]),
+            data=b"" if method == "POST" else None,
+        )
+        try:
+            response = urlopen(request, timeout=30)
+        except HTTPError as exc:
+            response = exc
+        with response:
+            if sys.stdout is not None:
+                body = response.read(65537)
+                charset = response.headers.get_content_charset() or "utf-8"
+                try:
+                    text = body.decode(charset, errors="replace")
+                except LookupError:
+                    text = body.decode("utf-8", errors="replace")
+                output = sys.stdout.buffer
+                output.write(text.encode("utf-8"))
+                output.write(f"\nHTTP {response.status}\n".encode("ascii"))
+                output.flush()
+        return 0
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        if sys.stderr is not None:
+            sys.stderr.buffer.write(f"HTTP: {exc}\n".encode("utf-8", errors="replace"))
+            sys.stderr.buffer.flush()
+        return 1
+
+
 def start_script(
     path: str,
     work_dir: Optional[str],
@@ -2804,6 +2864,7 @@ def start_script(
         _set_start_error("empty path")
         return None
 
+    http_worker_request = None
     st = script_type or ""
     is_http_get = st == "http_get" or path.startswith(("http://", "https://"))
     is_process = st == "process" or (not is_http_get and is_process_name_str(path))
@@ -2848,44 +2909,14 @@ def start_script(
         if curl_exe:
             args = build_http_request_curl_args(curl_exe, path, method, headers_raw, capture_response=capture_http)
         else:
-            # 回退：查找系统 python 执行 urllib 请求
-            python_exe = shutil.which("python") or shutil.which("python3") or shutil.which("py")
-            # 使用 json.dumps 安全转义，避免单引号注入
-            _safe_url = json.dumps(path)
-            _safe_method = json.dumps(method)
-            _safe_headers = json.dumps(dict(parse_http_headers(headers_raw)))
-            _py = (
-                "import urllib.request;"
-                "req=urllib.request.Request(%s,data=(b'' if %s!='GET' else None),method=%s,headers=%s);"
-            ) % (_safe_url, _safe_method, _safe_method, _safe_headers)
-            if capture_http:
-                _py += (
-                    "\nimport sys\nfrom urllib.error import HTTPError\n"
-                    "try:\n r=urllib.request.urlopen(req,timeout=30)\nexcept HTTPError as exc:\n r=exc\n"
-                    "with r:\n sys.stdout.buffer.write(r.read(65537))\n print(f'\\nHTTP {r.status}', flush=True)\n",
-                )
-                if not python_exe and getattr(sys, "frozen", False):
-                    _set_start_error("HTTP: curl or Python is required")
-                    return None
-            else:
-                _py += "r=urllib.request.urlopen(req,timeout=30); print(r.status)"
-            if python_exe:
-                args = [python_exe, "-c", _py]
-            elif not getattr(sys, 'frozen', False):
-                # 开发环境可用当前解释器
-                args = [sys.executable, "-c", _py]
-            else:
-                # 打包后的 exe 且无 curl、无 python：写临时脚本用 urllib 发请求
-                import tempfile
-                tmp_script = os.path.join(tempfile.gettempdir(), f"_http_get_{os.getpid()}_{int(time.time())}.py")
-                try:
-                    with open(tmp_script, "w", encoding="utf-8") as f:
-                        f.write(_py + "; import os,sys; os.remove(__file__); sys.exit(0)")
-                    args = [sys.executable, tmp_script]
-                except Exception:
-                    _set_start_error("http request helper create failed")
-                    return None
-        cwd = work_dir if work_dir else None
+            args = [sys.executable]
+            if not getattr(sys, "frozen", False):
+                args.append(os.path.abspath(__file__))
+            args.append("--internal-http-worker")
+            http_worker_request = {
+                "url": path, "method": method, "headers": parse_http_headers(headers_raw),
+            }
+        cwd = work_dir if work_dir and os.path.isdir(work_dir) else None
     else:
         if work_dir and not os.path.isabs(path):
             path = os.path.normpath(os.path.join(work_dir, path))
@@ -2968,17 +2999,25 @@ def start_script(
         # Managed jobs and the API service can outlive this application's bundle.
         proc_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
 
-    if capture_http and is_http_get:
+    if is_http_get and (capture_http or http_worker_request is not None):
         import tempfile
+        from contextlib import ExitStack
 
         try:
-            with tempfile.TemporaryFile() as response:
-                process = subprocess.Popen(
-                    args, cwd=cwd or None, env=proc_env, stdin=subprocess.DEVNULL,
+            with ExitStack() as files:
+                stdin = subprocess.DEVNULL
+                if http_worker_request is not None:
+                    stdin = files.enter_context(tempfile.TemporaryFile())
+                    stdin.write(json.dumps(http_worker_request).encode("utf-8"))
+                    stdin.seek(0)
+                response = files.enter_context(tempfile.TemporaryFile()) if capture_http else subprocess.DEVNULL
+                process = launch_child_process(
+                    args, cwd=cwd, env=proc_env, stdin=stdin,
                     stdout=response, stderr=subprocess.STDOUT,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
-                process.http_response = os.fdopen(os.dup(response.fileno()), "rb")
+                if capture_http:
+                    process.http_response = os.fdopen(os.dup(response.fileno()), "rb")
                 return process
         except OSError as exc:
             _set_start_error(f"HTTP: {exc}")
@@ -2994,7 +3033,7 @@ def start_script(
             if (is_http_get or is_process) and sys.platform == "win32":
                 log_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
             lf = open(log_path, "w", encoding="utf-8", errors="replace")
-            p = subprocess.Popen(
+            p = launch_child_process(
                 args,
                 cwd=cwd or None,
                 creationflags=log_flags,
@@ -3015,7 +3054,7 @@ def start_script(
         detach = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
         new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
         try:
-            p = subprocess.Popen(
+            p = launch_child_process(
                 args,
                 cwd=cwd or None,
                 creationflags=detach | new_group,
@@ -3035,7 +3074,7 @@ def start_script(
         if sys.platform == "win32":
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         try:
-            p = subprocess.Popen(
+            p = launch_child_process(
                 args,
                 cwd=cwd or None,
                 creationflags=creationflags,
@@ -3050,7 +3089,7 @@ def start_script(
             return None
     creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
     try:
-        p = subprocess.Popen(
+        p = launch_child_process(
             args,
             cwd=cwd or None,
             creationflags=creationflags,
@@ -9354,11 +9393,11 @@ class BatchManagerApp(TaskFeatureMixin):
             try:
                 if sys.platform == "win32":
                     # Windows: 使用 notepad 打开
-                    subprocess.Popen(["notepad.exe", file_path])
+                    launch_child_process(["notepad.exe", file_path])
                 else:
                     # Linux/Mac: 使用系统默认文本编辑器
                     editor = os.environ.get("EDITOR", "nano" if sys.platform != "darwin" else "open")
-                    subprocess.Popen([editor, file_path])
+                    launch_child_process([editor, file_path])
                 self.status_var.set(self._lang["msg_opened_in_editor"] % os.path.basename(file_path))
             except Exception as e:
                 messagebox.showerror(self._lang["msg_error"], self._lang["msg_cannot_open_file"] % str(e))
@@ -9368,7 +9407,7 @@ class BatchManagerApp(TaskFeatureMixin):
             if sys.platform == "win32":
                 os.startfile(file_path)
             else:
-                subprocess.Popen(["xdg-open", file_path] if sys.platform != "darwin" else ["open", file_path])
+                launch_child_process(["xdg-open", file_path] if sys.platform != "darwin" else ["open", file_path])
             self.status_var.set(self._lang["msg_opened_file"] % os.path.basename(file_path))
         except Exception as e:
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_cannot_open_file"] % str(e))
@@ -9388,7 +9427,7 @@ class BatchManagerApp(TaskFeatureMixin):
                 os.startfile(dir_path)
             else:
                 # Linux/Mac: 使用系统命令
-                subprocess.Popen(["xdg-open", dir_path] if sys.platform != "darwin" else ["open", dir_path])
+                launch_child_process(["xdg-open", dir_path] if sys.platform != "darwin" else ["open", dir_path])
             self.status_var.set(self._lang["msg_opened_dir"] % dir_path)
         except Exception as e:
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_cannot_open_dir"] % str(e))
@@ -9805,8 +9844,8 @@ class BatchManagerApp(TaskFeatureMixin):
         self.status_var.set(self._lang["msg_plugins_loaded"] % n if n else self._lang["msg_plugins_none"])
         try:
             if sys.platform == "win32": os.startfile(str(PLUGIN_DIR))
-            elif sys.platform == "darwin": subprocess.Popen(["open", str(PLUGIN_DIR)])
-            else: subprocess.Popen(["xdg-open", str(PLUGIN_DIR)])
+            elif sys.platform == "darwin": launch_child_process(["open", str(PLUGIN_DIR)])
+            else: launch_child_process(["xdg-open", str(PLUGIN_DIR)])
         except Exception: pass
 
     def _on_copy_ip(self, event=None):
@@ -10078,10 +10117,10 @@ class BatchManagerApp(TaskFeatureMixin):
             import subprocess
             if getattr(sys, 'frozen', False):
                 # PyInstaller 打包的 exe
-                subprocess.Popen([sys.executable], env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+                launch_child_process([sys.executable], env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
             else:
                 # Python 脚本
-                subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:])
+                launch_child_process([sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:])
         except Exception as e:
             messagebox.showerror(self._lang["btn_restart_self"], str(e))
             return
@@ -10608,6 +10647,9 @@ def cli_main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--internal-http-worker"]:
+        sys.exit(_run_http_worker())
+
     def _pop_gui_flag(flag: str) -> bool:
         found = False
         while flag in sys.argv:

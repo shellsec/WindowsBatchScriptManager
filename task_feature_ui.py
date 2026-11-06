@@ -251,10 +251,25 @@ class TaskFeatureMixin:
         try:
             validate_links(self.items)
             if core._check_circular_deps(self.items,ident):raise ValueError(self._task_text('循环依赖', 'Circular dependencies'))
-        except ValueError as exc:self.status_var.set(str(exc));return None
-        self._enqueue_task(item,trigger,set())
+        except (ValueError, RecursionError) as exc:
+            self.status_var.set(str(exc))
+            self._show_http_response(item, str(exc))
+            return None
+        if not self._enqueue_task(item,trigger,set()):
+            self._show_http_response(item, self.status_var.get())
+            return None
         self._drain_task_queue()
         return self._task_active.get(ident,{}).get('process')
+
+    def _show_http_response(self, item, response):
+        import main as core
+        if not core._is_http_task_item(item):
+            return
+        item['_http_response'] = response
+        if hasattr(self, 'detail_text'):
+            selected = self._get_selected_rows()
+            if selected and self._item_at(selected[0]) is item:
+                self._on_select(None)
 
     def _enqueue_task(self,item,trigger,trail):
         import main as core
@@ -270,6 +285,7 @@ class TaskFeatureMixin:
                 return False
         if self._task_queue.submit(ident):
             self._task_requests[ident]={'trigger':trigger,'trail':trail};item['_queued']=True
+            self._show_http_response(item, self._task_text('已加入队列，等待执行', 'Queued, waiting to run'))
         return True
 
     def _drain_task_queue(self):
@@ -295,8 +311,11 @@ class TaskFeatureMixin:
             process=self._launch_single_script(item,request['trigger'])
             if process:
                 self._task_active[ident]=dict(process=process,item=item,start=time.time(),trail=request['trail'],trigger=request['trigger'],cancelled=False,path=item.get('path'))
+                self._show_http_response(item, self._task_text('请求中，等待远端返回', 'Request in progress'))
             else:
-                self.status_var.set(f"{item.get('name','')}: {core.get_last_start_error()}")
+                error = core.get_last_start_error()
+                self.status_var.set(f"{item.get('name','')}: {error}")
+                self._show_http_response(item, self._task_text('启动失败', 'Start failed') + f': {error}')
 
     def _task_tick(self):
         import main as core
@@ -318,33 +337,38 @@ class TaskFeatureMixin:
                     with response:
                         response.seek(0)
                         output = response.read(65537)
-                    response_text = output[:65536].decode('utf-8', errors='replace').strip()
-                    if len(output) > 65536:
+                        response.seek(0, 2)
+                        size = response.tell()
+                        response.seek(max(0, size - 12))
+                        trailer = response.read()
+                    body_tail, separator, status = trailer.rpartition(b'\nHTTP ')
+                    status = status.rstrip(b'\r\n')
+                    has_status = separator and len(status) == 3 and status.isdigit()
+                    body_size = size - len(trailer) + len(body_tail) if has_status else size
+                    response_text = output[:min(body_size, 65536)].decode('utf-8', errors='replace').strip()
+                    if body_size > 65536:
                         response_text += self._task_text('\n… [预览已截断]', '\n… [Preview truncated]')
-                    else:
-                        body, separator, status = response_text.rpartition('\nHTTP ')
-                        if separator and len(status) == 3 and status.isascii() and status.isdecimal():
-                            body = body.strip()
+                    if has_status:
+                        if body_size <= 65536:
                             try:
-                                body = json.dumps(json.loads(body), ensure_ascii=False, indent=2)
+                                response_text = json.dumps(json.loads(response_text), ensure_ascii=False, indent=2)
                             except ValueError:
                                 pass
-                            response_text = f'HTTP {status}\n{body}'.rstrip()
+                        response_text = f'HTTP {status.decode("ascii")}\n{response_text}'.rstrip()
+                    if not response_text:
+                        response_text = self._task_text('请求进程退出，未收到返回内容', 'Request process exited without a response') + f' ({rc})'
                 if item is None:continue
                 cancelled=run['cancelled'] or item.get('pid')!=process.pid
                 item['pid']=None;item.pop('_popen',None);item.pop('pid_set_at',None)
                 if cancelled:
+                    self._show_http_response(item, self._task_text('已停止', 'Stopped'))
                     item['_last_result']=self._task_text('已停止', 'Stopped')
                     for record in reversed(self._execution_history.get(ident,[])):
                         if record.get('status')=='running':
                             record.update(status='stopped',stop_time=time.time(),duration=time.time()-run['start'],exit_code=rc);break
                     self._save_history();continue
                 if response_text is not None:
-                    item['_http_response'] = response_text
-                    if hasattr(self, 'detail_text'):
-                        selected = self._get_selected_rows()
-                        if selected and self._item_at(selected[0]) is item:
-                            self._on_select(None)
+                    self._show_http_response(item, response_text)
                 self._record_execution_stop(ident,rc,time.time()-run['start'])
                 success=rc in parse_codes(item.get('success_exit_codes',[0]))
                 item['_last_result']=self._task_text('成功', 'Success') if success else self._task_text('失败', 'Failed')
