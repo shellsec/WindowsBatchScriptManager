@@ -523,6 +523,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "Iniciando la limpieza. Solo se incluyen archivos temporales .tmp y .temp modificados hace más de 7 días. La papelera de la unidad C: se vaciará de forma permanente.",
+    "User temporary files": "Archivos temporales del usuario",
+    "System temporary files": "Archivos temporales del sistema",
+    "Thumbnail cache": "Caché de miniaturas",
+    "C: Recycle Bin": "Papelera de la unidad C:",
+    "DNS cache": "Caché DNS",
+    "Windows Update cache, Prefetch and system logs were kept.": "Se conservaron la caché de Windows Update, Prefetch y los registros del sistema.",
+    "C: drive cleanup log": "Registro de limpieza de la unidad C:",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "Buscando en %s archivos .tmp y .temp modificados hace más de 7 días.",
+    "Cleanup did not complete: %s": "No se pudo completar la limpieza: %s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "Limpieza completada. Se eliminaron %d archivos (%s bytes) y no se pudieron eliminar %d.",
+    "Scan complete. No files matched the cleanup rules.": "Análisis completado. Ningún archivo cumple los criterios de limpieza.",
+    "LOCALAPPDATA is unavailable.": "LOCALAPPDATA no está disponible.",
+    "Temporary files directory must be on C:.": "La carpeta de archivos temporales debe estar en la unidad C:.",
+    "Temporary files directory contains a redirected path.": "La ruta de la carpeta de archivos temporales contiene una redirección.",
     "\n… [Preview truncated]": "\n… [Vista previa truncada]",
     "Stopped": "Detenido",
     "Success": "Correcto",

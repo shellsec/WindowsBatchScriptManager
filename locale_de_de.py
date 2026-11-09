@@ -533,6 +533,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "Bereinigung gestartet. Temporäre Dateien sind auf .tmp und .temp beschränkt, die seit mehr als 7 Tagen unverändert sind. Der Papierkorb auf C: wird endgültig geleert.",
+    "User temporary files": "Temporäre Benutzerdateien",
+    "System temporary files": "Temporäre Systemdateien",
+    "Thumbnail cache": "Miniaturansichtencache",
+    "C: Recycle Bin": "Papierkorb auf C:",
+    "DNS cache": "DNS-Cache",
+    "Windows Update cache, Prefetch and system logs were kept.": "Windows Update-Cache, Prefetch und Systemprotokolle wurden beibehalten.",
+    "C: drive cleanup log": "Bereinigungsprotokoll für Laufwerk C:",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "%s wird nach .tmp- und .temp-Dateien durchsucht, die seit mehr als 7 Tagen unverändert sind.",
+    "Cleanup did not complete: %s": "Bereinigung konnte nicht abgeschlossen werden: %s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "Bereinigung abgeschlossen. %d Dateien (%s Byte) gelöscht, %d konnten nicht gelöscht werden.",
+    "Scan complete. No files matched the cleanup rules.": "Suche abgeschlossen. Keine Dateien entsprechen den Bereinigungskriterien.",
+    "LOCALAPPDATA is unavailable.": "LOCALAPPDATA ist nicht verfügbar.",
+    "Temporary files directory must be on C:.": "Der Ordner für temporäre Dateien muss auf Laufwerk C: liegen.",
+    "Temporary files directory contains a redirected path.": "Der Pfad zum Ordner für temporäre Dateien enthält eine Umleitung.",
     "Environment": "Laufzeitumgebung",
     "Discovering environments…": "Laufzeitumgebungen werden gesucht …",
     "Batch import": "Stapelimport",

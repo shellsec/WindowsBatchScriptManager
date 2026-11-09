@@ -533,6 +533,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "Iniciando a limpeza. Apenas arquivos temporários .tmp e .temp modificados há mais de 7 dias serão removidos. A Lixeira da unidade C: será esvaziada permanentemente.",
+    "User temporary files": "Arquivos temporários do usuário",
+    "System temporary files": "Arquivos temporários do sistema",
+    "Thumbnail cache": "Cache de miniaturas",
+    "C: Recycle Bin": "Lixeira da unidade C:",
+    "DNS cache": "Cache DNS",
+    "Windows Update cache, Prefetch and system logs were kept.": "O cache do Windows Update, o Prefetch e os logs do sistema foram preservados.",
+    "C: drive cleanup log": "Registro de limpeza da unidade C:",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "Procurando em %s arquivos .tmp e .temp modificados há mais de 7 dias.",
+    "Cleanup did not complete: %s": "Não foi possível concluir a limpeza: %s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "Limpeza concluída. %d arquivos removidos (%s bytes), %d não puderam ser removidos.",
+    "Scan complete. No files matched the cleanup rules.": "Verificação concluída. Nenhum arquivo atende aos critérios de limpeza.",
+    "LOCALAPPDATA is unavailable.": "LOCALAPPDATA não está disponível.",
+    "Temporary files directory must be on C:.": "A pasta de arquivos temporários deve estar na unidade C:.",
+    "Temporary files directory contains a redirected path.": "O caminho da pasta de arquivos temporários contém um redirecionamento.",
     "Follow system": "Seguir o idioma do sistema",
     "All": "Tudo",
     "HTTP response": "Resposta HTTP",

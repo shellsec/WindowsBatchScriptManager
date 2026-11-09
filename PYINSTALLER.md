@@ -16,11 +16,11 @@
 
 此错误发生在 Python 应用代码执行之前。`_MEI...\python310.dll` 是单文件程序临时解压的运行库路径；仅凭弹窗无法区分临时目录权限、安全软件拦截、运行库依赖或目标系统兼容性问题。
 
-默认构建已改为目录版，运行库位于程序旁的 `_internal`，不需要每次启动解压到临时目录；关闭 UPX，并通过独立 `.venv-build` 环境打包。构建机需安装 Python 3.10（含 tkinter）和 Python Launcher。
+默认构建为单文件 EXE，运行库和语言资源都封装在 EXE 里，启动时解包到临时目录。构建使用独立的 `.venv-build` 环境，关闭 UPX，构建机需安装 Python 3.10（含 tkinter）和 Python Launcher。
 
-运行 `build_exe.bat` 后，启动 `dist/release-时间戳/WindowsBatchScriptManager/WindowsBatchScriptManager.exe`。每次写入新发布目录，避免覆盖旧程序旁的用户配置。分发时必须复制整个目录，不能只复制 EXE。已有配置文件可复制到新 EXE 同目录。原有 dist 根目录单文件 EXE 不会删除，请勿误用旧文件。
+运行 `build_exe.bat` 后，启动 `dist/release-时间戳/WindowsBatchScriptManager.exe`。每次写入新发布目录，避免覆盖旧程序旁的用户配置。已有配置文件可复制到新 EXE 同目录。
 
-需要单文件版时运行 `build_exe.bat onefile`；直接使用 spec 时可先设置 `WBSM_ONEFILE=1`。
+如需目录版，可运行 `build_exe.bat onedir`，或在直接使用 spec 前设置 `WBSM_ONEFILE=0`。目录版分发时需保留 EXE 旁的 `_internal` 目录。
 
 ## 打包方式
 

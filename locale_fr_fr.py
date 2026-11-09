@@ -533,6 +533,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "Début du nettoyage. Seuls les fichiers temporaires .tmp et .temp modifiés il y a plus de 7 jours sont concernés. La corbeille du lecteur C: sera vidée définitivement.",
+    "User temporary files": "Fichiers temporaires utilisateur",
+    "System temporary files": "Fichiers temporaires système",
+    "Thumbnail cache": "Cache des miniatures",
+    "C: Recycle Bin": "Corbeille du lecteur C:",
+    "DNS cache": "Cache DNS",
+    "Windows Update cache, Prefetch and system logs were kept.": "Le cache de Windows Update, Prefetch et les journaux système ont été conservés.",
+    "C: drive cleanup log": "Journal de nettoyage du lecteur C:",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "Recherche dans %s des fichiers .tmp et .temp dont la dernière modification remonte à plus de 7 jours.",
+    "Cleanup did not complete: %s": "Le nettoyage a échoué : %s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "Nettoyage terminé. %d fichiers supprimés (%s octets), %d n’ont pas pu être supprimés.",
+    "Scan complete. No files matched the cleanup rules.": "Analyse terminée. Aucun fichier ne correspond aux critères de nettoyage.",
+    "LOCALAPPDATA is unavailable.": "LOCALAPPDATA est indisponible.",
+    "Temporary files directory must be on C:.": "Le dossier des fichiers temporaires doit se trouver sur le lecteur C:.",
+    "Temporary files directory contains a redirected path.": "Le chemin du dossier des fichiers temporaires contient une redirection.",
     "Follow system": "Suivre la langue du système",
     "All": "Tout",
     "HTTP response": "Réponse HTTP",

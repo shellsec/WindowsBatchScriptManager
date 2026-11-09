@@ -16,6 +16,10 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 言語メニューの先頭は「システムに従う」、2 番目は English です。言語は手動でも選べます。
 
+## C ドライブのクリーンアップ
+
+v1.3.4 では、ツールフォルダーを開くボタンの隣から C ドライブのクリーンアップを実行できます。処理はバックグラウンドで実行され、結果は下部のログに表示されます。C ドライブ上のユーザーおよびシステムの一時フォルダーで、最終更新から 7 日を超えた `.tmp` と `.temp` を削除します。C ドライブ上のユーザーのサムネイルキャッシュを削除し、**C ドライブのごみ箱を確認なしで完全に空にして**、DNS キャッシュを消去します。現在の権限で実行し、Windows Update キャッシュ、Prefetch、システムログは保持します。
+
 ![実行画面](docs/screenshots/ja-JP.jpg)
 
 [API / MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp) · [Apache-2.0](LICENSE) · [NOTICE](NOTICE)

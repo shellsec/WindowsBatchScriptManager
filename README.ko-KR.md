@@ -16,6 +16,10 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 언어 메뉴의 첫 번째 항목은 시스템 언어, 두 번째 항목은 English입니다. 언어를 직접 선택할 수도 있습니다.
 
+## C 드라이브 정리
+
+v1.3.4에서는 도구 폴더 열기 버튼 옆의 C 드라이브 정리를 사용할 수 있습니다. 백그라운드에서 실행되며 단계별 결과가 아래 로그에 표시됩니다. C 드라이브의 사용자 및 시스템 임시 폴더에서 수정한 지 7일이 지난 `.tmp`와 `.temp` 파일, C 드라이브의 사용자 미리 보기 캐시를 삭제합니다. **C 드라이브 휴지통을 확인 없이 영구적으로 비우고** DNS 캐시를 지웁니다. 현재 권한으로 실행하며 Windows Update 캐시, Prefetch, 시스템 로그는 보존합니다.
+
 ![실행 화면](docs/screenshots/ko-KR.jpg)
 
 [API / MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp) · [Apache-2.0](LICENSE) · [NOTICE](NOTICE)

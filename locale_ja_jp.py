@@ -533,6 +533,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "クリーンアップを開始します。一時ファイルは最終更新から 7 日を超えた .tmp と .temp に限ります。C ドライブのごみ箱は完全に空になります。",
+    "User temporary files": "ユーザーの一時ファイル",
+    "System temporary files": "システムの一時ファイル",
+    "Thumbnail cache": "サムネイルキャッシュ",
+    "C: Recycle Bin": "C ドライブのごみ箱",
+    "DNS cache": "DNS キャッシュ",
+    "Windows Update cache, Prefetch and system logs were kept.": "Windows Update キャッシュ、Prefetch、システムログは保持されました。",
+    "C: drive cleanup log": "C ドライブのクリーンアップログ",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "%s をスキャンし、最終更新から 7 日を超えた .tmp と .temp ファイルを探しています。",
+    "Cleanup did not complete: %s": "クリーンアップを完了できませんでした：%s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "クリーンアップ完了。%d 個のファイル（%s バイト）を削除し、%d 個は削除できませんでした。",
+    "Scan complete. No files matched the cleanup rules.": "スキャン完了。削除条件に一致するファイルはありませんでした。",
+    "LOCALAPPDATA is unavailable.": "LOCALAPPDATA が見つかりません。",
+    "Temporary files directory must be on C:.": "一時ファイルフォルダーは C ドライブ上にある必要があります。",
+    "Temporary files directory contains a redirected path.": "一時ファイルフォルダーのパスにリダイレクトが含まれています。",
     "Follow system": "システム設定に従う",
     "All": "すべて",
     "HTTP response": "HTTP レスポンス",

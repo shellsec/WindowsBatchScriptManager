@@ -533,6 +533,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "開始一鍵清理。只會清除超過 7 天未修改的 .tmp 和 .temp 暫存檔。C 槽資源回收筒將永久清空。",
+    "User temporary files": "使用者暫存檔",
+    "System temporary files": "系統暫存檔",
+    "Thumbnail cache": "縮圖快取",
+    "C: Recycle Bin": "C 槽資源回收筒",
+    "DNS cache": "DNS 快取",
+    "Windows Update cache, Prefetch and system logs were kept.": "已保留 Windows Update 快取、Prefetch 和系統日誌。",
+    "C: drive cleanup log": "C 槽清理日誌",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "正在掃描 %s，尋找超過 7 天未修改的 .tmp 和 .temp 檔案。",
+    "Cleanup did not complete: %s": "清理未完成：%s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "清理完成。已刪除 %d 個檔案（%s 位元組），無法刪除 %d 個。",
+    "Scan complete. No files matched the cleanup rules.": "掃描完成，沒有符合清理條件的檔案。",
+    "LOCALAPPDATA is unavailable.": "找不到 LOCALAPPDATA。",
+    "Temporary files directory must be on C:.": "暫存目錄必須位於 C 槽。",
+    "Temporary files directory contains a redirected path.": "暫存目錄的路徑含有重新導向。",
     'Environment': '執行環境',
     'Discovering environments…': '正在搜尋執行環境…',
     'Batch import': '批次匯入',

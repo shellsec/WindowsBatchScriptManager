@@ -16,6 +16,10 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 Im Sprachmenü steht die Systemsprache an erster Stelle und English an zweiter Stelle. Die Sprache kann auch manuell gewählt werden.
 
+## Laufwerk C: bereinigen
+
+In v1.3.4 befindet sich die Bereinigung neben der Schaltfläche zum Öffnen des Programmordners. Sie läuft im Hintergrund und zeigt die Ergebnisse unten im Protokoll an. Sie entfernt `.tmp`- und `.temp`-Dateien, die seit mehr als sieben Tagen unverändert sind, aus den temporären Benutzer- und Systemordnern auf C: sowie den Miniaturansichtencache des Benutzers auf C:. Sie **leert den Papierkorb auf C: endgültig und ohne Rückfrage** und löscht den DNS-Cache. Die Bereinigung verwendet die aktuellen Berechtigungen und lässt Windows Update-Cache, Prefetch und Systemprotokolle bestehen.
+
 ![Bildschirmfoto](docs/screenshots/de-DE.jpg)
 
 [API / MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp) · [Apache-2.0](LICENSE) · [NOTICE](NOTICE)

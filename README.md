@@ -3,7 +3,7 @@
 Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. Schedule jobs, queue runs, and control tasks remotely through HTTP or MCP.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-green.svg)](version.py)
+[![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
@@ -28,6 +28,10 @@ When upgrading, keep your existing `WindowsBatchScriptManager_scripts.json` and 
 - Switch among ten interface languages. The first option follows the system language.
 
 Schedules, queues, and follow-up tasks run while the desktop app is open. [Task management guide](docs/TASK_MANAGEMENT.md)
+
+## C: drive cleanup
+
+In v1.3.4, **Clean up C: drive** sits next to **Open tool folder**. It runs in the background and shows each result in the lower pane. It removes `.tmp` and `.temp` files last modified more than seven days ago from the current user’s and Windows’ temporary directories on C:, clears the current user’s thumbnail cache on C:, **permanently empties the C: Recycle Bin without confirmation**, and flushes DNS. It uses the current permissions and keeps the Windows Update cache, Prefetch, and system logs.
 
 ## Remote API and MCP
 

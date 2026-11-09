@@ -523,6 +523,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "Очистка началась. Из временных файлов будут удалены только .tmp и .temp, изменённые более 7 дней назад. Корзина диска C: будет очищена без возможности восстановления.",
+    "User temporary files": "Временные файлы пользователя",
+    "System temporary files": "Временные файлы системы",
+    "Thumbnail cache": "Кэш эскизов",
+    "C: Recycle Bin": "Корзина диска C:",
+    "DNS cache": "Кэш DNS",
+    "Windows Update cache, Prefetch and system logs were kept.": "Кэш Центра обновления Windows, Prefetch и системные журналы сохранены.",
+    "C: drive cleanup log": "Журнал очистки диска C:",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "Поиск в %s файлов .tmp и .temp, изменённых более 7 дней назад.",
+    "Cleanup did not complete: %s": "Не удалось завершить очистку: %s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "Очистка завершена. Удалено файлов: %d (%s байт). Не удалось удалить: %d.",
+    "Scan complete. No files matched the cleanup rules.": "Проверка завершена. Файлов, подходящих для очистки, нет.",
+    "LOCALAPPDATA is unavailable.": "Переменная LOCALAPPDATA недоступна.",
+    "Temporary files directory must be on C:.": "Папка временных файлов должна находиться на диске C:.",
+    "Temporary files directory contains a redirected path.": "Путь к папке временных файлов содержит перенаправление.",
     "\n… [Preview truncated]": "\n… [Предпросмотр сокращён]",
     "Stopped": "Остановлено",
     "Success": "Успешно",

@@ -523,6 +523,21 @@ TRANSLATIONS = {
 }
 
 INLINE = {
+    "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.": "정리를 시작합니다. 수정한 지 7일이 지난 .tmp 및 .temp 임시 파일만 삭제합니다. C 드라이브 휴지통은 영구적으로 비워집니다.",
+    "User temporary files": "사용자 임시 파일",
+    "System temporary files": "시스템 임시 파일",
+    "Thumbnail cache": "미리 보기 캐시",
+    "C: Recycle Bin": "C 드라이브 휴지통",
+    "DNS cache": "DNS 캐시",
+    "Windows Update cache, Prefetch and system logs were kept.": "Windows Update 캐시, Prefetch 및 시스템 로그는 유지되었습니다.",
+    "C: drive cleanup log": "C 드라이브 정리 로그",
+    "Scanning %s for .tmp and .temp files last modified over 7 days ago.": "%s에서 수정한 지 7일이 지난 .tmp 및 .temp 파일을 검색합니다.",
+    "Cleanup did not complete: %s": "정리를 완료하지 못했습니다: %s",
+    "Cleanup complete. Removed %d files (%s bytes); could not remove %d.": "정리 완료. 파일 %d개(%s바이트)를 삭제했고 %d개는 삭제하지 못했습니다.",
+    "Scan complete. No files matched the cleanup rules.": "검색 완료. 정리 조건에 맞는 파일이 없습니다.",
+    "LOCALAPPDATA is unavailable.": "LOCALAPPDATA를 찾을 수 없습니다.",
+    "Temporary files directory must be on C:.": "임시 파일 폴더는 C 드라이브에 있어야 합니다.",
+    "Temporary files directory contains a redirected path.": "임시 파일 폴더 경로가 리디렉션되어 있습니다.",
     "\n… [Preview truncated]": "\n… [미리보기 일부 생략]",
     "Stopped": "중지됨",
     "Success": "성공",

@@ -9,6 +9,7 @@ import os
 import queue
 import re
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -369,7 +370,6 @@ LANGUAGES = {
         "btn_stop_all_batch": "停止软件外所有批处理",
         "btn_open_tool_folder": "打开工具目录",
         "btn_disk_cleanup": "一键清理 C 盘",
-        "msg_disk_cleanup_failed": "无法打开 Windows 磁盘清理：%s",
         "msg_clear_invalid_confirm": "发现 %d 个路径失效或无效的项（脚本不存在或路径为空），是否一键删除？",
         "msg_no_invalid": "未发现路径失效或无效的项。",
         "status_cleared_invalid": "已清除 %d 个无效项",
@@ -924,7 +924,6 @@ LANGUAGES = {
         "btn_stop_all_batch": "Stop All Batch",
         "btn_open_tool_folder": "Open tool folder",
         "btn_disk_cleanup": "Clean up C: drive",
-        "msg_disk_cleanup_failed": "Could not open Windows Disk Cleanup: %s",
         "msg_clear_invalid_confirm": "Found %d items with missing or invalid script path (file not found or path empty). Delete them?",
         "msg_no_invalid": "No invalid items found.",
         "status_cleared_invalid": "Cleared %d invalid items",
@@ -2128,6 +2127,113 @@ def launch_child_process(*args, **kwargs) -> subprocess.Popen:
             return subprocess.Popen(*args, **kwargs)
         finally:
             set_directory(previous.value)
+
+
+class DiskCleanupPathError(ValueError):
+    def __init__(self, chinese: str, english: str):
+        super().__init__(english)
+        self.chinese = chinese
+
+
+def clean_cache_files(directory: Path, *, thumbnails=False) -> tuple[int, int, int]:
+    """Remove old temporary files or thumbnail databases without following redirects."""
+    reparse = stat.FILE_ATTRIBUTE_REPARSE_POINT
+    if directory.drive.upper() != "C:" or not directory.is_absolute() or ".." in directory.parts:
+        raise DiskCleanupPathError("临时文件目录必须位于 C 盘。", "Temporary files directory must be on C:.")
+    for parent in (*reversed(directory.parents), directory):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & reparse:
+            raise DiskCleanupPathError(
+                "临时文件目录的路径包含重定向。",
+                "Temporary files directory contains a redirected path.",
+            )
+
+    cutoff = time.time() - 7 * 24 * 60 * 60
+    removed = total_bytes = skipped = 0
+    pending = [directory]
+    while pending:
+        folder = pending.pop()
+        try:
+            info = folder.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & reparse:
+                continue
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    try:
+                        name = entry.name.lower()
+                        info = entry.stat(follow_symlinks=False)
+                        if getattr(info, "st_file_attributes", 0) & reparse:
+                            continue
+                        if stat.S_ISDIR(info.st_mode) and not thumbnails and not name.startswith("_mei"):
+                            pending.append(Path(entry.path))
+                            continue
+                        if not stat.S_ISREG(info.st_mode):
+                            continue
+                        if thumbnails:
+                            if not (name.startswith("thumbcache_") and name.endswith(".db")):
+                                continue
+                        elif not name.endswith((".tmp", ".temp")) or info.st_mtime >= cutoff:
+                            continue
+                        os.unlink(entry.path)
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        skipped += 1
+                    else:
+                        removed += 1
+                        total_bytes += info.st_size
+        except FileNotFoundError:
+            continue
+        except OSError:
+            skipped += 1
+    return removed, total_bytes, skipped
+
+
+def empty_c_drive_recycle_bin():
+    import ctypes
+    from ctypes import wintypes
+
+    class RecycleBinInfo(ctypes.Structure):
+        _fields_ = [
+            ("size", wintypes.DWORD),
+            ("bytes", ctypes.c_longlong),
+            ("items", ctypes.c_longlong),
+        ]
+
+    drive = "C:\\"
+    shell = ctypes.windll.shell32
+    query = shell.SHQueryRecycleBinW
+    query.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(RecycleBinInfo)]
+    query.restype = ctypes.HRESULT
+    info = RecycleBinInfo()
+    info.size = ctypes.sizeof(info)
+    if query(drive, ctypes.byref(info)) == 0 and not info.items:
+        return
+
+    empty = shell.SHEmptyRecycleBinW
+    empty.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.DWORD]
+    empty.restype = ctypes.HRESULT
+    # No confirmation dialog, progress window, or sound.
+    result = empty(None, drive, 0x7)
+    if result != 0:
+        raise OSError(f"HRESULT 0x{result & 0xffffffff:08X}")
+
+
+def flush_windows_dns_cache():
+    ipconfig = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / "ipconfig.exe"
+    process = launch_child_process(
+        [str(ipconfig), "/flushdns"], cwd=ipconfig.parent,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        code = process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+    if code != 0:
+        raise OSError(f"ipconfig /flushdns: {process.returncode}")
 
 
 def start_process_by_name(name: str, work_dir: Optional[str] = None) -> Optional[subprocess.Popen]:
@@ -5944,6 +6050,7 @@ class BatchManagerApp(TaskFeatureMixin):
         detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.detail_text.configure(yscrollcommand=detail_scroll.set)
         self.detail_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._disk_cleanup_log = []
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
         # 状态栏
@@ -6004,33 +6111,33 @@ class BatchManagerApp(TaskFeatureMixin):
         return invalid
 
     def _on_select(self, evt):
-        sel = self.tree.selection()
-        if not sel:
-            self.detail_text.config(state=tk.NORMAL)
-            self.detail_text.delete("1.0", tk.END)
-            self.detail_text.config(state=tk.DISABLED)
-            self._update_visit_button_state()
-            return
         rows = self._get_selected_rows()
         it = self._item_at(rows[0]) if rows else None
+        sections = []
+        height = 3
         if it:
             path_label = self._task_text("路径", "Path")
             work_label = self._task_text("工作目录", "Work Directory")
             work_dir = it.get("work_dir") or self._task_text("（同脚本目录）", "(same as script dir)")
-            s = f"{path_label}: {it.get('path', '')}\n{work_label}: {work_dir}"
+            sections.append(f"{path_label}: {it.get('path', '')}\n{work_label}: {work_dir}")
             is_http = _is_http_task_item(it)
-            self.detail_text.config(height=8 if is_http else 3)
+            height = 8 if is_http else 3
             if is_http and it.get("_http_response") is not None:
                 heading = self._task_text("HTTP 返回结果", "HTTP response")
-                s += f"\n\n{heading}\n{it['_http_response']}"
-                pane_height = self.task_pane.winfo_height()
-                target_height = min(200, pane_height // 3)
-                if target_height > self.detail_frame.winfo_height():
-                    self.task_pane.sashpos(0, pane_height - target_height)
-            self.detail_text.config(state=tk.NORMAL)
-            self.detail_text.delete("1.0", tk.END)
-            self.detail_text.insert("1.0", s)
-            self.detail_text.config(state=tk.DISABLED)
+                sections.append(f"{heading}\n{it['_http_response']}")
+        if self._disk_cleanup_log:
+            heading = self._task_text("C 盘清理日志", "C: drive cleanup log")
+            sections.append("\n".join([heading, *self._disk_cleanup_log]))
+            height = 8
+        if len(sections) > 1 or self._disk_cleanup_log:
+            pane_height = self.task_pane.winfo_height()
+            target_height = min(200, pane_height // 3)
+            if target_height > self.detail_frame.winfo_height():
+                self.task_pane.sashpos(0, pane_height - target_height)
+        self.detail_text.config(height=height, state=tk.NORMAL)
+        self.detail_text.delete("1.0", tk.END)
+        self.detail_text.insert("1.0", "\n\n".join(sections))
+        self.detail_text.config(state=tk.DISABLED)
         self._update_visit_button_state()
 
     def _update_visit_button_state(self):
@@ -9428,17 +9535,87 @@ class BatchManagerApp(TaskFeatureMixin):
         """在资源管理器中打开程序/工具所在目录。"""
         self._on_open_dir(str(Path(get_app_path()).resolve().parent))
 
+    def _append_disk_cleanup_log(self, message):
+        self._disk_cleanup_log.append(f"[{time.strftime('%H:%M:%S')}] {message}")
+        del self._disk_cleanup_log[:-50]
+        self._on_select(None)
+        self.detail_text.see(tk.END)
+
     def _on_disk_cleanup(self):
-        """Open the Windows category preview and let the user confirm cleanup."""
-        windows = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-        cleanmgr = windows / "System32" / "cleanmgr.exe"
-        try:
-            launch_child_process([str(cleanmgr), "/d", "C"], cwd=cleanmgr.parent)
-        except OSError as exc:
-            messagebox.showerror(
-                self._lang["msg_error"], self._lang["msg_disk_cleanup_failed"] % exc,
-                parent=self.root,
-            )
+        """Start the preset C: cleanup directly and report the result."""
+        log = queue.Queue()
+        self.btn_disk_cleanup.state(["disabled"])
+        text = self._task_text
+        local_data = os.environ.get("LOCALAPPDATA")
+        windows = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+        scope = text(
+            "开始一键清理。临时文件限超过 7 天未修改的 .tmp / .temp，C 盘回收站将永久清空。",
+            "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.",
+        )
+        self._append_disk_cleanup_log(scope)
+
+        def clean_local_cache(relative_path, *, thumbnails=False):
+            if not local_data:
+                raise DiskCleanupPathError("未找到 LOCALAPPDATA。", "LOCALAPPDATA is unavailable.")
+            return clean_cache_files(Path(local_data) / relative_path, thumbnails=thumbnails)
+
+        steps = (
+            (text("用户临时文件", "User temporary files"), lambda: clean_local_cache("Temp")),
+            (text("系统临时文件", "System temporary files"), lambda: clean_cache_files(windows / "Temp")),
+            (text("缩略图缓存", "Thumbnail cache"), lambda: clean_local_cache(
+                r"Microsoft\Windows\Explorer", thumbnails=True,
+            )),
+            (text("C 盘回收站", "C: Recycle Bin"), empty_c_drive_recycle_bin),
+            (text("DNS 缓存", "DNS cache"), flush_windows_dns_cache),
+        )
+
+        def clean():
+            try:
+                for index, (label, action) in enumerate(steps, 1):
+                    prefix = f"[{index}/{len(steps)}] {label}"
+                    log.put(prefix + "…")
+                    try:
+                        outcome = action()
+                    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                        reason = text(exc.chinese, str(exc)) if isinstance(exc, DiskCleanupPathError) else str(exc)
+                        message = text("清理未完成：%s", "Cleanup did not complete: %s") % reason
+                    else:
+                        if outcome is None:
+                            message = text("成功", "Success")
+                        elif any(outcome):
+                            removed, size, skipped = outcome
+                            summary = text(
+                                "清理完成。删除 %d 个文件（%s 字节），无法删除 %d 个。",
+                                "Cleanup complete. Removed %d files (%s bytes); could not remove %d.",
+                            )
+                            message = summary % (removed, f"{size:,}", skipped)
+                        else:
+                            message = text(
+                                "扫描完成，没有符合清理条件的文件。",
+                                "Scan complete. No files matched the cleanup rules.",
+                            )
+                    log.put(f"{prefix} — {message}")
+                log.put(text(
+                    "保留 Windows 更新缓存、Prefetch 和系统日志。",
+                    "Windows Update cache, Prefetch and system logs were kept.",
+                ))
+            finally:
+                log.put(None)
+
+        def show_result():
+            while True:
+                try:
+                    message = log.get_nowait()
+                except queue.Empty:
+                    self.root.after(100, show_result)
+                    return
+                if message is None:
+                    self.btn_disk_cleanup.state(["!disabled"])
+                    return
+                self._append_disk_cleanup_log(message)
+
+        threading.Thread(target=clean, daemon=True).start()
+        self.root.after(100, show_result)
 
     def _on_open_dir(self, dir_path: str):
         """在资源管理器中打开目录。"""

@@ -16,6 +16,10 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 A primeira opção do menu de idiomas segue o sistema. A segunda é English. Também é possível escolher o idioma manualmente.
 
+## Limpar a unidade C:
+
+Na v1.3.4, o botão de limpeza fica ao lado do botão que abre a pasta da ferramenta. A limpeza é executada em segundo plano e exibe os resultados no registro na parte inferior. Remove arquivos `.tmp` e `.temp` modificados há mais de sete dias nas pastas temporárias do usuário e do sistema em C:, além do cache de miniaturas do usuário em C:. **Esvazia permanentemente a Lixeira de C: sem confirmação** e limpa o cache DNS. Usa as permissões atuais e preserva o cache do Windows Update, o Prefetch e os logs do sistema.
+
 ![Captura de tela](docs/screenshots/pt-BR.jpg)
 
 [API / MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp) · [Apache-2.0](LICENSE) · [NOTICE](NOTICE)

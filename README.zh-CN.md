@@ -3,7 +3,7 @@
 用一个 Windows 桌面工具管理批处理、Python、Node.js 和 PowerShell 脚本。支持定时、队列，以及通过 HTTP API 或 MCP 远程操作任务。
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-green.svg)](version.py)
+[![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
@@ -28,6 +28,10 @@
 - 切换十种界面语言，菜单第一项为「跟随系统」。
 
 定时、队列和后续任务由运行中的桌面程序管理。[任务管理指南](docs/TASK_MANAGEMENT.md)
+
+## 一键清理 C 盘
+
+v1.3.4 的「一键清理 C 盘」位于「打开工具目录」右侧。清理在后台执行，每一步的结果显示在下方日志。它清理 C 盘用户和系统临时目录中超过 7 天未修改的 `.tmp` 和 `.temp` 文件、当前用户在 C 盘的缩略图缓存，**无需确认就永久清空 C 盘回收站**，并刷新 DNS 缓存。清理使用当前权限，保留 Windows 更新缓存、Prefetch 和系统日志。
 
 ## 远程 API 与 MCP
 

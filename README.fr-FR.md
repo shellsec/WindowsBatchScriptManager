@@ -16,6 +16,10 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 Le premier choix du menu Langue suit le système, et le deuxième est English. Vous pouvez aussi choisir une langue manuellement.
 
+## Nettoyer le lecteur C:
+
+Dans la v1.3.4, le bouton de nettoyage se trouve à côté de celui qui ouvre le dossier de l’outil. Le nettoyage s’exécute en arrière-plan et affiche les résultats dans le journal en bas de la fenêtre. Il supprime les fichiers `.tmp` et `.temp` modifiés il y a plus de sept jours dans les dossiers temporaires utilisateur et système sur C:, ainsi que le cache des miniatures de l’utilisateur sur C:. Il **vide définitivement la corbeille de C: sans confirmation** et efface le cache DNS. Il utilise les autorisations actuelles et conserve le cache Windows Update, Prefetch et les journaux système.
+
 ![Capture d’écran](docs/screenshots/fr-FR.jpg)
 
 [API / MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp) · [Apache-2.0](LICENSE) · [NOTICE](NOTICE)
