@@ -368,6 +368,8 @@ LANGUAGES = {
         "btn_notification": "通知配置",
         "btn_stop_all_batch": "停止软件外所有批处理",
         "btn_open_tool_folder": "打开工具目录",
+        "btn_disk_cleanup": "一键清理 C 盘",
+        "msg_disk_cleanup_failed": "无法打开 Windows 磁盘清理：%s",
         "msg_clear_invalid_confirm": "发现 %d 个路径失效或无效的项（脚本不存在或路径为空），是否一键删除？",
         "msg_no_invalid": "未发现路径失效或无效的项。",
         "status_cleared_invalid": "已清除 %d 个无效项",
@@ -921,6 +923,8 @@ LANGUAGES = {
         "btn_notification": "Notifications",
         "btn_stop_all_batch": "Stop All Batch",
         "btn_open_tool_folder": "Open tool folder",
+        "btn_disk_cleanup": "Clean up C: drive",
+        "msg_disk_cleanup_failed": "Could not open Windows Disk Cleanup: %s",
         "msg_clear_invalid_confirm": "Found %d items with missing or invalid script path (file not found or path empty). Delete them?",
         "msg_no_invalid": "No invalid items found.",
         "status_cleared_invalid": "Cleared %d invalid items",
@@ -5665,6 +5669,12 @@ class BatchManagerApp(TaskFeatureMixin):
             self.btn_stop_all_batch = None
         self.btn_open_tool_folder = ttk.Button(row1b, text=self._lang["btn_open_tool_folder"], command=self._on_open_tool_folder)
         self.btn_open_tool_folder.pack(side=tk.LEFT, padx=2)
+        self.btn_disk_cleanup = None
+        if sys.platform == "win32":
+            self.btn_disk_cleanup = ttk.Button(
+                row1b, text=self._lang["btn_disk_cleanup"], command=self._on_disk_cleanup
+            )
+            self.btn_disk_cleanup.pack(side=tk.LEFT, padx=2)
         # API 服务（独立管理，默认 WindowsBatchScriptManager_api_server.py，不加入任务列表）
         row_api = ttk.Frame(ops_block)
         row_api.pack(fill=tk.X, pady=(0, 3))
@@ -6170,6 +6180,8 @@ class BatchManagerApp(TaskFeatureMixin):
         if getattr(self, "btn_stop_all_batch", None):
             self.btn_stop_all_batch.config(text=self._lang["btn_stop_all_batch"])
         self.btn_open_tool_folder.config(text=self._lang["btn_open_tool_folder"])
+        if self.btn_disk_cleanup is not None:
+            self.btn_disk_cleanup.config(text=self._lang["btn_disk_cleanup"])
         if getattr(self, "btn_restart_self", None):
             self.btn_restart_self.config(text=self._lang["btn_restart_self"])
         if getattr(self, "btn_shutdown", None):
@@ -9415,6 +9427,18 @@ class BatchManagerApp(TaskFeatureMixin):
     def _on_open_tool_folder(self):
         """在资源管理器中打开程序/工具所在目录。"""
         self._on_open_dir(str(Path(get_app_path()).resolve().parent))
+
+    def _on_disk_cleanup(self):
+        """Open the Windows category preview and let the user confirm cleanup."""
+        windows = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        cleanmgr = windows / "System32" / "cleanmgr.exe"
+        try:
+            launch_child_process([str(cleanmgr), "/d", "C"], cwd=cleanmgr.parent)
+        except OSError as exc:
+            messagebox.showerror(
+                self._lang["msg_error"], self._lang["msg_disk_cleanup_failed"] % exc,
+                parent=self.root,
+            )
 
     def _on_open_dir(self, dir_path: str):
         """在资源管理器中打开目录。"""

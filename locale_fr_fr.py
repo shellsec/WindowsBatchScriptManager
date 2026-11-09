@@ -1,6 +1,7 @@
 """French interface translations."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "Nettoyer le lecteur C:",
     "window_title": "Gestionnaire de scripts Windows",
     "btn_add": "Ajouter",
     "btn_edit": "Modifier",

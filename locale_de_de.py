@@ -1,6 +1,7 @@
 """German translations for the desktop interface."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "Laufwerk C: bereinigen",
     "window_title": "Windows Batch Script Manager – Skriptverwaltung",
     "btn_add": "Hinzufügen",
     "btn_edit": "Bearbeiten",

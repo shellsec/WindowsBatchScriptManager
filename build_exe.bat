@@ -13,9 +13,9 @@ echo [1/3] Install build dependencies...
 "%BUILD_PY%" -m pip install -r requirements-build.txt
 if errorlevel 1 goto :failed
 
-rem Default: no extraction to TEMP at startup.
-set "WBSM_ONEFILE=0"
-if /i "%~1"=="onefile" set "WBSM_ONEFILE=1"
+rem Default: package the application and its runtime in one executable.
+set "WBSM_ONEFILE=1"
+if /i "%~1"=="onedir" set "WBSM_ONEFILE=0"
 rem Always use a fresh output directory; existing releases may contain user data.
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "BUILD_STAMP=%%i"
 set "BUILD_OUTPUT=dist\release-%BUILD_STAMP%"

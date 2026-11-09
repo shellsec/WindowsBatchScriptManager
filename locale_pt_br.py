@@ -1,6 +1,7 @@
 """Brazilian Portuguese interface translations."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "Limpar unidade C:",
     "window_title": "Gerenciador de scripts do Windows",
     "btn_add": "Adicionar",
     "btn_edit": "Editar",

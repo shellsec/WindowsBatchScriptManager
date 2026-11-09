@@ -1,6 +1,7 @@
 """Traditional Chinese (Taiwan) translations for the desktop interface."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "一鍵清理 C 槽",
     'window_title': 'Windows Batch Script Manager - Windows 批次處理腳本管理器',
     'btn_add': '新增',
     'btn_edit': '編輯',

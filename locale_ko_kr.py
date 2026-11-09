@@ -1,6 +1,7 @@
 """Korean UI translations."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "C 드라이브 정리",
     "window_title": "Windows 배치 스크립트 관리자",
     "btn_add": "추가",
     "btn_edit": "편집",

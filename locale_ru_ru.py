@@ -1,6 +1,7 @@
 """Russian UI translations."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "Очистка диска C:",
     "window_title": "Диспетчер сценариев Windows",
     "btn_add": "Добавить",
     "btn_edit": "Изменить",

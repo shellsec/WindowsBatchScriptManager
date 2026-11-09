@@ -1,6 +1,7 @@
 """Spanish UI translations."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "Limpiar unidad C:",
     "window_title": "Administrador de scripts de Windows",
     "btn_add": "Añadir",
     "btn_edit": "Editar",

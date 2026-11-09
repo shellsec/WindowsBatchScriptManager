@@ -1,6 +1,7 @@
 """Japanese interface translations."""
 
 TRANSLATIONS = {
+    "btn_disk_cleanup": "C ドライブのクリーンアップ",
     "window_title": "Windows バッチスクリプトマネージャー",
     "btn_add": "追加",
     "btn_edit": "編集",
