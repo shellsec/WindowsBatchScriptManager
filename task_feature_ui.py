@@ -249,7 +249,7 @@ class TaskFeatureMixin:
             return None
         if item.get('pid') and core.is_process_running(item['pid']):return None
         try:
-            validate_links(self.items)
+            validate_links(self.items, start_id=ident)
             if core._check_circular_deps(self.items,ident):raise ValueError(self._task_text('循环依赖', 'Circular dependencies'))
         except (ValueError, RecursionError) as exc:
             self.status_var.set(str(exc))
@@ -349,6 +349,9 @@ class TaskFeatureMixin:
                     if body_size > 65536:
                         response_text += self._task_text('\n… [预览已截断]', '\n… [Preview truncated]')
                     if has_status:
+                        if rc == 0 and 400 <= int(status) < 600:
+                            # Older curl versions lack --fail-with-body.
+                            rc = core.HTTP_ERROR_EXIT_CODE
                         if body_size <= 65536:
                             try:
                                 response_text = json.dumps(json.loads(response_text), ensure_ascii=False, indent=2)
@@ -392,8 +395,8 @@ class TaskFeatureMixin:
 
     def _dispatch_task_chain(self,item,field,trail):
         try:
-            validate_links(self.items)
-        except ValueError as exc:
+            validate_links(self.items, start_id=item['id'])
+        except (ValueError, RecursionError) as exc:
             self.status_var.set(str(exc))
             return
         visited=trail;visited.add(item['id']);by_id={i['id']:i for i in self.items}

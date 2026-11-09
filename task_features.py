@@ -31,10 +31,23 @@ def link_ids(value):
     parts = value if isinstance(value,(list,tuple)) else str(value).split(',')
     return list(dict.fromkeys(int(str(p).strip()) for p in parts if str(p).strip()))
 
-def validate_links(items):
+def validate_links(items, *, start_id=None):
+    """Validate the whole configuration, or just the tasks reachable from a run."""
     by_id = {i['id']: i for i in items}
+    if start_id is not None:
+        related = {}
+        pending = [start_id]
+        while pending:
+            ident = pending.pop()
+            if ident in related or ident not in by_id:
+                continue
+            item = by_id[ident]
+            related[ident] = item
+            for field in ('depends_on', 'on_success', 'on_failure'):
+                pending.extend(link_ids(item.get(field)))
+        by_id = related
     graph = {ident: [] for ident in by_id}
-    for item in items:
+    for item in by_id.values():
         for target in link_ids(item.get('on_success')) + link_ids(item.get('on_failure')):
             if target not in by_id:
                 raise ValueError(f'任务不存在 / Missing task: {target}')

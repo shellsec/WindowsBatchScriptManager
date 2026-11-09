@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
 from typing import Optional
-from urllib.request import urlopen, Request
+from urllib.request import HTTPRedirectHandler, build_opener, urlopen, Request
 from urllib.error import URLError, HTTPError
 import urllib.parse
 from html.parser import HTMLParser
@@ -2906,11 +2906,15 @@ def normalize_http_method(method) -> str:
     return m if m in ("GET", "POST") else "GET"
 
 
+HTTP_ERROR_EXIT_CODE = 22
+
+
 def build_http_request_curl_args(curl_exe: str, url: str, method=None, headers_raw=None, capture_response=False) -> list:
     """构造 curl 参数（缺省 GET、无额外请求头）。"""
-    args = [curl_exe, "-s", "-o", os.devnull, "-w", "%{http_code}", "--max-time", "30", "--connect-timeout", "10"]
+    # -q must come first so a curl config file cannot enable redirects.
+    args = [curl_exe, "-q", "-fs", "-o", os.devnull, "-w", "%{http_code}", "--max-time", "30", "--connect-timeout", "10"]
     if capture_response:
-        args = [curl_exe, "-sS", "-w", "\nHTTP %{http_code}\n", "--max-time", "30",
+        args = [curl_exe, "-q", "-sS", "-w", "\nHTTP %{http_code}\n", "--max-time", "30",
                 "--connect-timeout", "10", "--max-filesize", "1048576"]
     method = normalize_http_method(method)
     if method != "GET":
@@ -2919,6 +2923,12 @@ def build_http_request_curl_args(curl_exe: str, url: str, method=None, headers_r
         args.extend(["-H", "%s: %s" % (k, v)])
     args.append(url)
     return args
+
+
+class _NoHTTPRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Report the original response without forwarding task credentials.
+        return None
 
 
 def _run_http_worker() -> int:
@@ -2932,7 +2942,7 @@ def _run_http_worker() -> int:
             data=b"" if method == "POST" else None,
         )
         try:
-            response = urlopen(request, timeout=30)
+            response = build_opener(_NoHTTPRedirect()).open(request, timeout=30)
         except HTTPError as exc:
             response = exc
         with response:
@@ -2947,7 +2957,7 @@ def _run_http_worker() -> int:
                 output.write(text.encode("utf-8"))
                 output.write(f"\nHTTP {response.status}\n".encode("ascii"))
                 output.flush()
-        return 0
+        return HTTP_ERROR_EXIT_CODE if 400 <= response.status < 600 else 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
         if sys.stderr is not None:
             sys.stderr.buffer.write(f"HTTP: {exc}\n".encode("utf-8", errors="replace"))
@@ -3511,9 +3521,13 @@ class AddEditDialog(tk.Toplevel):
         self._notebook.pack(fill=tk.BOTH, expand=True, padx=6, pady=(6, 2))
 
         # ===== 标签页1：基本 =====
-        tab_basic = ttk.Frame(self._notebook)
-        self._notebook.add(tab_basic, text=self._lang["tab_basic"])
+        tab_basic = self._add_form_tab(self._lang["tab_basic"])
         tab_basic.columnconfigure(1, weight=1)
+
+        def add_hint(parent, row, text):
+            label = ttk.Label(parent, text=text, foreground="gray", wraplength=280)
+            label.grid(row=row, column=1, sticky=tk.W, padx=4, pady=(0, 2))
+            return label
 
         row = 0
         ttk.Label(tab_basic, text=self._lang["label_name"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
@@ -3552,15 +3566,15 @@ class AddEditDialog(tk.Toplevel):
 
         ttk.Label(tab_basic, text=self._lang["label_task_type"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
         ftype = ttk.Frame(tab_basic)
-        ftype.grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
+        ftype.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
         self.combo_task_type = ttk.Combobox(ftype, textvariable=self.var_task_type,
                                              values=[v for _, v in _type_options],
                                              state="readonly", width=18)
-        self.combo_task_type.pack(side=tk.LEFT)
         self._type_display_map = _type_display_map
         self._type_reverse_map = _type_reverse_map
         self.combo_task_type.bind("<<ComboboxSelected>>", self._on_task_type_changed)
-        ttk.Button(ftype, text=self._lang["btn_auto_detect"], command=self._on_auto_detect, width=10).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(ftype, text=self._lang["btn_auto_detect"], command=self._on_auto_detect).pack(side=tk.RIGHT, padx=(6, 0))
+        self.combo_task_type.pack(side=tk.LEFT, fill=tk.X, expand=True)
         row += 1
 
         # ===== 路径/URL/进程名 输入行 =====
@@ -3569,55 +3583,63 @@ class AddEditDialog(tk.Toplevel):
         fpath = ttk.Frame(tab_basic)
         fpath.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
         self.entry_path = ttk.Entry(fpath, textvariable=self.var_path, width=44)
+        self.btn_browse = ttk.Button(fpath, text=self._lang["btn_browse"], command=self._on_browse_path)
+        self.btn_browse.pack(side=tk.RIGHT, padx=(4, 0))
         self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.btn_browse = ttk.Button(fpath, text=self._lang["btn_browse"], command=self._on_browse_path, width=6)
-        self.btn_browse.pack(side=tk.LEFT, padx=2)
         # 路径提示（独占一行，放在输入框下方，不影响输入框宽度）
         row += 1
-        self.label_path_hint = ttk.Label(tab_basic, text="", foreground="gray")
-        self.label_path_hint.grid(row=row, column=0, columnspan=3, sticky=tk.W, padx=6, pady=(0, 2))
+        self.label_path_hint = add_hint(tab_basic, row, "")
         row += 1
         self._http_opts_frame = ttk.Frame(tab_basic)
-        self._http_opts_frame.grid(row=row, column=0, columnspan=3, sticky=tk.EW, padx=6, pady=2)
+        self._http_opts_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=6, pady=2)
         self._http_opts_frame.columnconfigure(1, weight=1)
-        ttk.Label(self._http_opts_frame, text=self._lang["label_http_method"]).grid(row=0, column=0, sticky=tk.W, padx=(0, 6), pady=2)
+        ttk.Label(self._http_opts_frame, text=self._lang["label_http_method"], wraplength=160).grid(row=0, column=0, sticky=tk.NW, padx=(0, 6), pady=2)
         http_method_row = ttk.Frame(self._http_opts_frame)
-        http_method_row.grid(row=0, column=1, sticky=tk.W, padx=4, pady=2)
+        http_method_row.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=2)
         self.combo_http_method = ttk.Combobox(
             http_method_row, textvariable=self.var_http_method,
             values=["GET", "POST"], state="readonly", width=10,
         )
-        self.combo_http_method.pack(side=tk.LEFT)
         self.btn_fill_local_api = ttk.Button(
             http_method_row, text=self._lang["btn_fill_local_api"],
             command=self._on_fill_local_api,
         )
-        self.btn_fill_local_api.pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Label(self._http_opts_frame, text=self._lang["label_http_headers"]).grid(row=1, column=0, sticky=tk.NW, padx=(0, 6), pady=2)
+        self.combo_http_method.pack(anchor=tk.W)
+        self.btn_fill_local_api.pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(self._http_opts_frame, text=self._lang["label_http_headers"], wraplength=160).grid(row=1, column=0, sticky=tk.NW, padx=(0, 6), pady=2)
         ttk.Entry(self._http_opts_frame, textvariable=self.var_http_headers, width=50).grid(row=1, column=1, sticky=tk.EW, padx=4, pady=2)
-        ttk.Label(self._http_opts_frame, text=self._lang["hint_http_headers"], foreground="gray").grid(row=2, column=1, sticky=tk.W, padx=4, pady=(0, 2))
+        add_hint(self._http_opts_frame, 2, self._lang["hint_http_headers"])
         row += 1
         ttk.Label(tab_basic, text=self._lang["label_work_dir"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
         fwork = ttk.Frame(tab_basic)
         fwork.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(fwork, text=self._lang["btn_browse"], command=self._on_browse_dir).pack(side=tk.RIGHT, padx=(4, 0))
         ttk.Entry(fwork, textvariable=self.var_work, width=44).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(fwork, text=self._lang["btn_browse"], command=self._on_browse_dir, width=6).pack(side=tk.LEFT, padx=2)
         row += 1
         ttk.Label(tab_basic, text=self._lang["label_group"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
         ttk.Entry(tab_basic, textvariable=self.var_group, width=50).grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
-        ttk.Label(tab_basic, text=self._lang["hint_group_empty"]).grid(row=row, column=2, sticky=tk.W, padx=2)
+        row += 1
+        add_hint(tab_basic, row, self._lang["hint_group_empty"])
         row += 1
         self.label_type = ttk.Label(tab_basic, text=self._type_from_path(self.var_path.get()))
         self.label_type.grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
         row += 1
         self.label_interpreter = ttk.Label(tab_basic, text=self._lang["label_interpreter"])
         self.label_interpreter.grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
-        self.entry_interpreter = ttk.Entry(tab_basic, textvariable=self.var_interpreter, width=50)
-        self.entry_interpreter.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
+        self._interpreter_row = ttk.Frame(tab_basic)
+        self._interpreter_row.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
+        self.entry_interpreter = ttk.Entry(self._interpreter_row, textvariable=self.var_interpreter, width=50)
+        self.entry_interpreter.pack(fill=tk.X)
         from task_feature_ui import choose_environment
-        ttk.Button(tab_basic, text=translate_inline(current_lang, "选择环境", "Environment"), command=lambda: choose_environment(self, self.var_path.get(), self.var_work.get(), self.var_interpreter, self._feature_initial, current_lang)).grid(row=row, column=2, padx=2)
-        self.label_interpreter_hint = ttk.Label(tab_basic, text="")
-        self.label_interpreter_hint.grid(row=row, column=3, sticky=tk.W, padx=2)
+        ttk.Button(
+            self._interpreter_row, text=translate_inline(current_lang, "选择环境", "Environment"),
+            command=lambda: choose_environment(
+                self, self.var_path.get(), self.var_work.get(), self.var_interpreter,
+                self._feature_initial, current_lang,
+            ),
+        ).pack(anchor=tk.W, pady=(4, 0))
+        row += 1
+        self.label_interpreter_hint = add_hint(tab_basic, row, "")
         row += 1
         self.var_log = tk.BooleanVar(value=bool(initial.get("log_output", False)))
         self.cb_log = ttk.Checkbutton(tab_basic, text=self._lang["check_log_output"], variable=self.var_log)
@@ -3639,7 +3661,7 @@ class AddEditDialog(tk.Toplevel):
         fargs.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
         ttk.Entry(fargs, textvariable=self.var_args, width=44).pack(side=tk.LEFT, fill=tk.X, expand=True)
         row += 1
-        ttk.Label(tab_basic, text=self._lang["hint_args"], foreground="gray").grid(row=row, column=1, sticky=tk.W, padx=4)
+        add_hint(tab_basic, row, self._lang["hint_args"])
         row += 1
         # 环境变量
         ttk.Label(tab_basic, text=self._lang["label_env_vars"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
@@ -3647,28 +3669,30 @@ class AddEditDialog(tk.Toplevel):
         fenv.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
         ttk.Entry(fenv, textvariable=self.var_env_vars, width=44).pack(side=tk.LEFT, fill=tk.X, expand=True)
         row += 1
-        ttk.Label(tab_basic, text=self._lang["hint_env_vars"], foreground="gray").grid(row=row, column=1, sticky=tk.W, padx=4)
+        add_hint(tab_basic, row, self._lang["hint_env_vars"])
         row += 1
         # 启动超时
         ttk.Label(tab_basic, text=self._lang["label_startup_timeout"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
         ftimeout = ttk.Frame(tab_basic)
         ftimeout.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
         ttk.Entry(ftimeout, textvariable=self.var_startup_timeout, width=10).pack(side=tk.LEFT)
-        ttk.Label(ftimeout, text=self._lang["hint_startup_timeout"], foreground="gray").pack(side=tk.LEFT, padx=(4, 0))
+        row += 1
+        add_hint(tab_basic, row, self._lang["hint_startup_timeout"])
         row += 1
         # 依赖链
         ttk.Label(tab_basic, text=self._lang["label_depends_on"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
-        fdep = ttk.Frame(tab_basic)
-        fdep.grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
-        ttk.Entry(fdep, textvariable=self.var_depends_on, width=30).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(fdep, text=self._lang["label_delay_after_dep"]).pack(side=tk.LEFT, padx=(8, 2))
-        ttk.Entry(fdep, textvariable=self.var_delay_after_dep, width=6).pack(side=tk.LEFT)
+        ttk.Entry(tab_basic, textvariable=self.var_depends_on, width=30).grid(row=row, column=1, sticky=tk.EW, padx=4, pady=4)
         row += 1
-        ttk.Label(tab_basic, text=self._lang["hint_depends_on"], foreground="gray").grid(row=row, column=1, sticky=tk.W, padx=4)
+        add_hint(tab_basic, row, self._lang["hint_depends_on"])
+        row += 1
+        ttk.Label(tab_basic, text=self._lang["label_delay_after_dep"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
+        ttk.Entry(tab_basic, textvariable=self.var_delay_after_dep, width=6).grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
+        for label in tab_basic.grid_slaves(column=0):
+            if isinstance(label, ttk.Label):
+                label.configure(wraplength=160)
 
         # ===== 标签页2：定时 =====
-        tab_schedule = ttk.Frame(self._notebook)
-        self._notebook.add(tab_schedule, text=self._lang["tab_schedule"])
+        tab_schedule = self._add_form_tab(self._lang["tab_schedule"], horizontal=True)
 
         ttk.Checkbutton(tab_schedule, text=self._lang["check_schedule_enabled"], variable=self.var_schedule_enabled, command=self._update_schedule_visible).grid(row=0, column=0, columnspan=4, sticky=tk.W, padx=6, pady=4)
 
@@ -3778,7 +3802,70 @@ class AddEditDialog(tk.Toplevel):
         self._on_task_type_changed()  # 初始化标签/提示/浏览按钮状态
         self._update_type()
         self._update_log_visible()
-    
+
+    def _add_form_tab(self, title, *, horizontal=False):
+        tab = ttk.Frame(self._notebook)
+        self._notebook.add(tab, text=title)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(
+            tab, width=1, height=1, highlightthickness=0,
+            background=ttk.Style(self).lookup("TFrame", "background"),
+        )
+        canvas.grid(row=0, column=0, sticky=tk.NSEW)
+        scrollbar = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky=tk.NS)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        if horizontal:
+            x_scrollbar = ttk.Scrollbar(tab, orient=tk.HORIZONTAL, command=canvas.xview)
+            canvas.configure(xscrollcommand=x_scrollbar.set)
+
+        form = ttk.Frame(canvas)
+        form_id = canvas.create_window(0, 0, anchor=tk.NW, window=form)
+
+        def fit_form(event):
+            width = canvas.winfo_width()
+            if horizontal:
+                if form.winfo_reqwidth() > width:
+                    x_scrollbar.grid(row=1, column=0, sticky=tk.EW)
+                    width = form.winfo_reqwidth()
+                else:
+                    x_scrollbar.grid_remove()
+                    canvas.xview_moveto(0)
+            if int(canvas.itemcget(form_id, "width")) != width:
+                canvas.itemconfigure(form_id, width=width)
+            canvas.configure(scrollregion=canvas.bbox(form_id))
+
+        def wheel(event):
+            if self._notebook.select() != str(tab) or not str(event.widget).startswith(str(tab) + "."):
+                return
+            if isinstance(event.widget, ttk.Combobox):
+                return
+            direction = -1 if event.num == 4 or event.delta > 0 else 1
+            canvas.yview_scroll(direction * max(1, abs(event.delta) // 120), "units")
+            return "break"
+
+        def reveal_focus(event):
+            widget = event.widget
+            if self._notebook.select() != str(tab) or not str(widget).startswith(str(form) + "."):
+                return
+            top = widget.winfo_rooty() - form.winfo_rooty()
+            bottom = top + widget.winfo_height()
+            view_top = canvas.canvasy(0)
+            height = canvas.winfo_height()
+            if top < view_top or bottom > view_top + height:
+                start = top if top < view_top else bottom - height
+                canvas.yview_moveto(max(0, start) / max(1, form.winfo_height()))
+
+        canvas.bind("<Configure>", fit_form)
+        form.bind("<Configure>", fit_form)
+        self.bind("<MouseWheel>", wheel, add="+")
+        if sys.platform != "win32" and sys.platform != "darwin":
+            self.bind("<Button-4>", wheel, add="+")
+            self.bind("<Button-5>", wheel, add="+")
+        self.bind("<FocusIn>", reveal_focus, add="+")
+        return form
+
     def _reinit_ui_text(self):
         """重新初始化对话框中的所有界面文本（用于语言切换后）。"""
         # 更新标题
@@ -3909,7 +3996,7 @@ class AddEditDialog(tk.Toplevel):
                 # 递归处理标签页内的控件
                 for child in widget.winfo_children():
                     self._update_all_widgets_text(child)
-            elif widget_type == "TFrame" or widget_type == "TLabelFrame":
+            elif widget_type in ("TFrame", "TLabelFrame", "Canvas"):
                 # 递归处理子控件
                 self._update_all_widgets_text(widget)
                 # 更新 LabelFrame 的标题
@@ -4216,7 +4303,7 @@ class AddEditDialog(tk.Toplevel):
         if type_key in ("command", "http_get", "process", "system_shutdown", "system_reboot"):
             self.btn_browse.pack_forget()
         else:
-            self.btn_browse.pack(side=tk.LEFT, padx=2)
+            self.btn_browse.pack(side=tk.RIGHT, padx=(4, 0), before=self.entry_path)
         self._update_type()
 
     def _on_auto_detect(self):
@@ -4280,7 +4367,7 @@ class AddEditDialog(tk.Toplevel):
         needs_interpreter = stype in ("python", "node", "shell", "powershell")
         if needs_interpreter:
             self.label_interpreter.grid()
-            self.entry_interpreter.grid()
+            self._interpreter_row.grid()
             self.label_interpreter_hint.grid()
             if stype == "python":
                 self.label_interpreter.config(text=self._lang["label_interpreter_python"])
@@ -4291,10 +4378,13 @@ class AddEditDialog(tk.Toplevel):
             elif stype == "shell":
                 self.label_interpreter.config(text=self._lang["label_interpreter_shell"])
                 self.label_interpreter_hint.config(text=self._lang["hint_shell_interpreter"])
+            else:
+                self.label_interpreter.config(text=self._lang["label_interpreter"])
+                self.label_interpreter_hint.config(text="")
             self.entry_interpreter.config(state=tk.NORMAL)
         else:
             self.label_interpreter.grid_remove()
-            self.entry_interpreter.grid_remove()
+            self._interpreter_row.grid_remove()
             self.label_interpreter_hint.grid_remove()
         
         self._update_log_visible()

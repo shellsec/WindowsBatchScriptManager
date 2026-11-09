@@ -7,6 +7,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
+from urllib.request import Request
 import main
 from task_features import TaskQueue, migrate_items
 
@@ -76,6 +78,72 @@ class Runtime(unittest.TestCase):
             process=main.start_script(str(script),td,'python',sys.executable,log_path=str(log),extra_args='--title "hello world"',env_vars='FEATURE_TEST=ok')
             self.assertIsNotNone(process);self.assertEqual(process.wait(timeout=8),0)
             self.assertEqual(main.json.loads(log.read_text(encoding='utf-8')),[['--title','hello world'],'ok'])
+
+    def test_unrelated_invalid_link_does_not_block_workflow(self):
+        first = {'id': 1, 'path': 'first', 'on_success': [2]}
+        next_task = {'id': 2, 'path': 'next'}
+        broken = {'id': 3, 'path': 'broken', 'on_failure': [99]}
+        app = self.make_app([first, next_task, broken])
+        launched = []
+
+        def launch(item, trigger):
+            process = Mock(pid=item['id'] + 100, http_response=None)
+            process.poll.return_value = 0
+            item['pid'] = process.pid
+            launched.append(item['id'])
+            return process
+
+        app._launch_single_script = launch
+        self.assertIsNotNone(app._start_single_script(first))
+        self.tick_until_done(app)
+        self.assertIsNone(app._start_single_script(broken))
+        self.assertEqual(launched, [1, 2])
+        self.assertIn('Missing task: 99', app.status_var.set.call_args.args[0])
+
+    def test_http_error_uses_exit_code_rules_and_keeps_body(self):
+        for success_codes, expected_target in (([0], 3), ([0, 22], 2)):
+            with self.subTest(success_codes=success_codes):
+                item = {
+                    'id': 1, 'path': 'http://example.invalid', 'pid': 12345,
+                    'success_exit_codes': success_codes, 'on_success': [2], 'on_failure': [3],
+                }
+                app = self.make_app([item, {'id': 2, 'path': 'next'}, {'id': 3, 'path': 'recover'}])
+                process = Mock(pid=12345, http_response=io.BytesIO(b'{"error":"test"}\nHTTP 500\n'))
+                process.poll.return_value = 0  # Older curl reports transport success.
+                app._record_execution_start(1)
+                app._task_active[1] = {
+                    'process': process, 'item': item, 'start': time.time(),
+                    'trail': set(), 'cancelled': False,
+                }
+                app._launch_single_script = Mock(return_value=None)
+                app._task_tick()
+                launched_item, trigger = app._launch_single_script.call_args.args
+                self.assertEqual((launched_item['id'], trigger), (expected_target, 'chain'))
+                self.assertEqual(app._execution_history[1][0]['exit_code'], 22)
+                self.assertIn('HTTP 500\n', item['_http_response'])
+                self.assertIn('"error": "test"', item['_http_response'])
+
+    def test_http_worker_keeps_redirect_and_error_responses(self):
+        from email.message import Message
+
+        request = Request('http://example.invalid', headers={'X-API-Key': 'synthetic'}, method='POST')
+        handler = main._NoHTTPRedirect()
+        self.assertIsNone(handler.redirect_request(request, None, 302, 'Found', {}, 'http://other.invalid'))
+        payload = '{"url":"http://example.invalid","method":"POST","headers":[["X-API-Key","synthetic"]]}'
+        for status, expected in ((302, 0), (500, 22)):
+            with self.subTest(status=status):
+                body = b'{"result":"test"}'
+                response = HTTPError(request.full_url, status, 'Probe', Message(), io.BytesIO(body))
+                stream = io.BytesIO()
+                stdout = Mock(buffer=stream)
+                with patch.object(sys, 'stdin', io.StringIO(payload)), patch.object(sys, 'stdout', stdout), \
+                        patch.object(main, 'build_opener') as build:
+                    build.return_value.open.side_effect = response
+                    self.assertEqual(main._run_http_worker(), expected)
+                    outgoing = build.return_value.open.call_args.args[0]
+                    self.assertEqual(outgoing.method, 'POST')
+                    self.assertIn('synthetic', outgoing.headers.values())
+                self.assertEqual(stream.getvalue(), body + f'\nHTTP {status}\n'.encode())
 
 
 if __name__=='__main__':unittest.main()
