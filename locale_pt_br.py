@@ -1,6 +1,7 @@
 """Brazilian Portuguese interface translations."""
 
 TRANSLATIONS = {
+    "msg_confirm_batch_action": "Deseja executar esta ação em várias tarefas?",
     "btn_disk_cleanup": "Limpar unidade C:",
     "window_title": "Gerenciador de scripts do Windows",
     "btn_add": "Adicionar",

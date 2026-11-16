@@ -1,6 +1,7 @@
 """Russian UI translations."""
 
 TRANSLATIONS = {
+    "msg_confirm_batch_action": "Выполнить это действие для нескольких задач?",
     "btn_disk_cleanup": "Очистка диска C:",
     "window_title": "Диспетчер сценариев Windows",
     "btn_add": "Добавить",

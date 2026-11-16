@@ -1,6 +1,7 @@
 """Spanish UI translations."""
 
 TRANSLATIONS = {
+    "msg_confirm_batch_action": "¿Quieres ejecutar esta acción en varias tareas?",
     "btn_disk_cleanup": "Limpiar unidad C:",
     "window_title": "Administrador de scripts de Windows",
     "btn_add": "Añadir",

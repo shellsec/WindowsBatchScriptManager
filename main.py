@@ -352,6 +352,7 @@ LANGUAGES = {
         "btn_start_all": "全部启动",
         "btn_stop_all": "全部停止",
         "btn_start_stopped": "其他停止都启动",
+        "msg_confirm_batch_action": "确定执行此批量操作吗？",
         "btn_stop_running": "其他启动都停止",
         "btn_scan_running": "自动识别",
         "btn_scan_and_add": "识别并加入",
@@ -906,6 +907,7 @@ LANGUAGES = {
         "btn_start_all": "Start All",
         "btn_stop_all": "Stop All",
         "btn_start_stopped": "Start All Stopped",
+        "msg_confirm_batch_action": "Do you want to run this action on multiple tasks?",
         "btn_stop_running": "Stop All Running",
         "btn_scan_running": "Scan Running",
         "btn_scan_and_add": "Scan & Add",
@@ -9132,10 +9134,21 @@ class BatchManagerApp(TaskFeatureMixin):
             fire_plugin_hook("on_script_start", item=it, pid=p.pid)
         return p
 
-    def _on_start(self):
+    def _confirm_batch_action(self, label_key, group=None):
+        title = self._lang[label_key]
+        if group:
+            title += f" ({group})"
+        return messagebox.askyesno(
+            title, self._lang["msg_confirm_batch_action"],
+            parent=self.root, default=messagebox.NO,
+        )
+
+    def _on_start(self, *, confirmed=False):
         rows = self._get_selected_rows()
         if not rows:
             messagebox.showinfo(self._lang["msg_info"], self._lang["msg_select_items"])
+            return
+        if len(rows) > 1 and not confirmed and not self._confirm_batch_action("menu_start"):
             return
         for row in rows:
             item = self._item_at(row)
@@ -9173,8 +9186,10 @@ class BatchManagerApp(TaskFeatureMixin):
         except Exception as e:
             messagebox.showerror(self._lang["msg_error"], str(e), parent=self.root)
 
-    def _on_stop(self):
+    def _on_stop(self, *, confirmed=False):
         rows = self._get_selected_rows()
+        if len(rows) > 1 and not confirmed and not self._confirm_batch_action("menu_stop"):
+            return
         for row in rows:
             item = self._item_at(row)
             if item:
@@ -9227,6 +9242,8 @@ class BatchManagerApp(TaskFeatureMixin):
         if not rows:
             messagebox.showinfo(self._lang["msg_info"], self._lang["msg_select_items"])
             return
+        if len(rows) > 1 and not self._confirm_batch_action("btn_restart"):
+            return
         # 先收集需要停止的 PID，用于判断进程是否真正退出
         self._restart_pids_to_wait = []
         for r in rows:
@@ -9235,7 +9252,7 @@ class BatchManagerApp(TaskFeatureMixin):
                 pid = it.get("pid")
                 if pid and is_process_running(pid):
                     self._restart_pids_to_wait.append(pid)
-        self._on_stop()  # 会 _sync_tree 并清空选中
+        self._on_stop(confirmed=True)  # 会 _sync_tree 并清空选中
         self._restart_ids = [self.items[r].get("id") for r in rows if 0 <= r < len(self.items)]
         self._restart_wait_start = time.time()
         self._restart_wait_phase()
@@ -9254,15 +9271,20 @@ class BatchManagerApp(TaskFeatureMixin):
         to_sel = [child for child in self.tree.get_children() if self._item_id_from_tree_iid(child) in id_set]
         if to_sel:
             self.tree.selection_set(*to_sel)
-        self._on_start()
+        self._on_start(confirmed=True)
 
     def _on_start_all(self):
+        if not self.items or not self._confirm_batch_action("btn_start_all"):
+            return
         for item in self.items:
             self._start_single_script(item)
         self._sync_tree()
         self.status_var.set(self._task_text("已提交全部任务", "All tasks submitted"))
 
     def _on_stop_all(self, skip_whitelist: bool = False):
+        # Power actions handle confirmation at their own entry points.
+        if not skip_whitelist and (not self.items or not self._confirm_batch_action("btn_stop_all")):
+            return
         for item in self.items:
             if not (skip_whitelist and is_service_whitelisted(item.get('path', ''))):
                 self._cancel_task(item)
@@ -9297,6 +9319,8 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _on_start_stopped(self):
         """启动所有已停止的任务。"""
+        if not self.items or not self._confirm_batch_action("btn_start_stopped"):
+            return
         n = 0
         for it in self.items:
             pid = it.get("pid")
@@ -9310,6 +9334,8 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _on_stop_running(self):
         """停止所有正在运行的任务。"""
+        if not self.items or not self._confirm_batch_action("btn_stop_running"):
+            return
         n = 0
         for it in self.items:
             pid = it.get("pid")
@@ -9369,7 +9395,7 @@ class BatchManagerApp(TaskFeatureMixin):
             names_str += self._lang["msg_stop_confirm_more"] % (len(script_processes) - 5)
         msg = self._lang["msg_stop_confirm_detail"] % (len(script_processes), names_str)
         
-        if not messagebox.askyesno(self._lang["msg_confirm_stop"], msg):
+        if not messagebox.askyesno(self._lang["msg_confirm_stop"], msg, parent=self.root, default=messagebox.NO):
             return
         
         # 停止所有脚本进程
@@ -9415,6 +9441,8 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _on_start_group(self, group):
         """启动指定分组的所有任务。"""
+        if not self._confirm_batch_action("menu_start_group", group):
+            return
         n = 0
         for it in self.items:
             if it.get("group") == group:
@@ -9429,6 +9457,8 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _on_stop_group(self, group):
         """停止指定分组的所有任务。"""
+        if not self._confirm_batch_action("menu_stop_group", group):
+            return
         n = 0
         for it in self.items:
             if it.get("group") == group:

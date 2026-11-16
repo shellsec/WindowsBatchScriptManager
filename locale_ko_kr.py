@@ -1,6 +1,7 @@
 """Korean UI translations."""
 
 TRANSLATIONS = {
+    "msg_confirm_batch_action": "여러 작업에 이 동작을 실행하시겠습니까?",
     "btn_disk_cleanup": "C 드라이브 정리",
     "window_title": "Windows 배치 스크립트 관리자",
     "btn_add": "추가",

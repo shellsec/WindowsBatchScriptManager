@@ -1,6 +1,7 @@
 """Japanese interface translations."""
 
 TRANSLATIONS = {
+    "msg_confirm_batch_action": "この操作を複数のタスクに実行しますか？",
     "btn_disk_cleanup": "C ドライブのクリーンアップ",
     "window_title": "Windows バッチスクリプトマネージャー",
     "btn_add": "追加",
