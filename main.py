@@ -27,6 +27,7 @@ import urllib.parse
 from html.parser import HTMLParser
 
 from version import __version__
+import program_update
 from task_features import FEATURE_FIELDS, migrate_items, parse_codes, link_ids, validate_links, environment_vars, merge_task_items
 from task_feature_ui import TaskFeatureMixin
 from ui_language import (LANGUAGE_OPTIONS, detect_system_language, load_ui_catalogs,
@@ -406,6 +407,7 @@ LANGUAGES = {
         "menu_language_en": "English",
         "menu_help": "帮助",
         "menu_about": "关于",
+        "menu_check_update": "检查程序更新",
         "msg_about": "Windows Batch Script Manager\n版本: %s",
         "tray_show": "显示主窗口",
         "tray_quit": "退出",
@@ -961,6 +963,7 @@ LANGUAGES = {
         "menu_language_en": "English",
         "menu_help": "Help",
         "menu_about": "About",
+        "menu_check_update": "Check for Updates",
         "msg_about": "Windows Batch Script Manager\nVersion: %s",
         "tray_show": "Show window",
         "tray_quit": "Quit",
@@ -5784,6 +5787,7 @@ class BatchManagerApp(TaskFeatureMixin):
         self._settings_menu.add_command(label=self._lang.get("menu_restore_bak", "从上次备份恢复配置"), command=self._on_restore_config_bak)
         self._settings_menu.add_command(label=self._lang.get("menu_global_hotkeys", "快捷键说明"), command=self._on_show_hotkeys)
         self._settings_menu.add_separator()
+        self._settings_menu.add_command(label=self._lang["menu_check_update"], command=self._check_program_update)
         self._settings_menu.add_command(label=self._lang.get("menu_about", "关于"), command=self._on_about)
         
         # 开机/登录自启：Windows 注册表；Mac launchd；Linux systemd user
@@ -6501,7 +6505,7 @@ class BatchManagerApp(TaskFeatureMixin):
             pass
         for menu, keys in (
             (self._settings_menu, ("menu_close_to_tray", "menu_minimize_to_tray",
-                                   "menu_restore_bak", "menu_global_hotkeys", "menu_about")),
+                                   "menu_restore_bak", "menu_global_hotkeys", "menu_check_update", "menu_about")),
             (self._refresh_menu, ("btn_pause_refresh", "btn_resume_refresh")),
         ):
             updated_labels = {previous_labels[key]: self._lang[key] for key in keys
@@ -10426,25 +10430,182 @@ class BatchManagerApp(TaskFeatureMixin):
         except Exception:
             self._show_from_tray()
 
-    def _on_restart_self(self):
-        """重启管理器自身：启动新进程后退出当前进程。运行中的脚本不停止，重启后自动接管。"""
-        if not messagebox.askyesno(self._lang["btn_restart_self"],
-                                    self._lang["msg_restart_self_confirm"]):
-            return
-        # 先保存配置
-        self._save_config()
-        # 启动新进程
-        try:
-            import subprocess
-            if getattr(sys, 'frozen', False):
-                # PyInstaller 打包的 exe
-                launch_child_process([sys.executable], env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+    def _update_executable(self):
+        bundle = getattr(sys, "_MEIPASS", "")
+        if sys.platform == "win32" and getattr(sys, "frozen", False) and Path(bundle).name.startswith("_MEI"):
+            return Path(sys.executable).resolve()
+        return None
+
+    def _run_update_job(self, work, complete):
+        result = queue.Queue()
+        self._update_busy = True
+
+        def worker():
+            try:
+                result.put((True, work()))
+            except Exception as exc:
+                result.put((False, exc))
+
+        def poll():
+            try:
+                ok, value = result.get_nowait()
+            except queue.Empty:
+                self.root.after(150, poll)
+                return
+            self._update_busy = False
+            if ok:
+                complete(value)
             else:
-                # Python 脚本
-                launch_child_process([sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:])
-        except Exception as e:
-            messagebox.showerror(self._lang["btn_restart_self"], str(e))
+                messagebox.showerror(self._lang["menu_check_update"], str(value), parent=self.root)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(150, poll)
+
+    def _check_program_update(self):
+        if getattr(self, "_update_busy", False) or getattr(self, "_restart_pending", False):
             return
+        executable = self._update_executable()
+
+        def checked(release):
+            title = self._lang["menu_check_update"]
+            if release is None:
+                messagebox.showinfo(title, self._task_text("当前已是最新版本。", "You are up to date."), parent=self.root)
+                return
+            current = f"v{__version__} → v{release.version}"
+            if executable is None:
+                prompt = self._task_text("发现新版。打开 GitHub 发布页面？", "An update is available. Open GitHub Releases?")
+            else:
+                prompt = self._task_text("下载并安装新版？安装后工具会重启。", "Download and install the update? The application will restart.")
+            if not messagebox.askyesno(title, f"{current}\n\n{prompt}", default=messagebox.NO, parent=self.root):
+                return
+            if executable is None:
+                webbrowser.open(program_update.RELEASES)
+                return
+            self.status_var.set(self._task_text("正在下载并验证更新…", "Downloading and verifying the update…"))
+            language = self._current_language
+            self._run_update_job(lambda: program_update.stage_update(release, executable, language=language),
+                                 lambda staged: self._install_program_update(executable, staged))
+
+        self._run_update_job(lambda: program_update.check_release(__version__), checked)
+
+    def _restart_waits_for_tasks(self):
+        pending = getattr(self, "_task_queue", None)
+        active = getattr(self, "_task_active", {})
+        return bool(pending and pending.pending) or any(
+            _is_http_task_item(run["item"]) or run["item"].get("on_success") or run["item"].get("on_failure")
+            or run["process"].poll() is not None
+            for run in active.values()
+        )
+
+    def _running_tasks_for_restart(self):
+        running = []
+        if HAS_PSUTIL:
+            for item in self.items:
+                if not item.get("pid"):
+                    continue
+                try:
+                    created = psutil.Process(item["pid"]).create_time()
+                except psutil.Error:
+                    continue
+                running.append({
+                    "id": item["id"], "path": item.get("path"), "pid": item["pid"],
+                    "created": created, "log": item.get("_log_path"),
+                })
+        return running
+
+    def _install_program_update(self, executable, staged):
+        if self._restart_waits_for_tasks():
+            self._update_busy = True
+            self.status_var.set(self._task_text(
+                "新版已下载，等待队列和任务串联完成后安装。",
+                "Update downloaded. Installation will begin after queued tasks and workflows finish.",
+            ))
+            self.root.after(1000, lambda: self._install_program_update(executable, staged))
+            return
+        self._update_busy = False
+        try:
+            self._save_config()
+            program_update.write_running_tasks(staged, self._running_tasks_for_restart())
+            program_update.launch_installer(launch_child_process, executable, staged)
+        except Exception as exc:
+            for file in (staged, program_update.task_snapshot_path(staged)):
+                try:
+                    file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            messagebox.showerror(self._lang["menu_check_update"], str(exc), parent=self.root)
+            return
+        self._quit_for_restart()
+
+    def _restore_restarted_tasks(self):
+        records = program_update.read_running_tasks(Path(get_app_path()))
+        if records is None:
+            return False
+        by_id = {item["id"]: item for item in self.items}
+        for record in records:
+            if not HAS_PSUTIL:
+                break
+            ident, pid, created = record.get("id"), record.get("pid"), record.get("created")
+            if not isinstance(ident, int) or not isinstance(pid, int) or not isinstance(created, (int, float)):
+                continue
+            item = by_id.get(ident)
+            if item is None or item.get("path") != record.get("path"):
+                continue
+            try:
+                process = psutil.Process(pid)
+                if process.create_time() != created or not process.is_running():
+                    continue
+            except psutil.Error:
+                continue
+            item.update(pid=process.pid, pid_set_at=created)
+            if record.get("log"):
+                item["_log_path"] = record["log"]
+        return True
+
+    def _on_restart_self(self):
+        if getattr(self, "_restart_pending", False) or getattr(self, "_update_busy", False):
+            return
+        if not messagebox.askyesno(self._lang["btn_restart_self"],
+                                    self._lang["msg_restart_self_confirm"],
+                                    parent=self.root, default=messagebox.NO):
+            return
+        self._restart_pending = True
+        self._restart_self_when_ready()
+
+    def _restart_self_when_ready(self):
+        if self._restart_waits_for_tasks():
+            self.status_var.set(self._task_text(
+                "等待队列和任务串联完成后重启工具。",
+                "The application will restart after queued tasks and workflows finish.",
+            ))
+            self.root.after(1000, self._restart_self_when_ready)
+            return
+        snapshot = None
+        try:
+            self._save_config()
+            snapshot = program_update.create_restart_snapshot(Path(get_app_path()), self._running_tasks_for_restart())
+            env = {
+                **os.environ,
+                "PYINSTALLER_RESET_ENVIRONMENT": "1",
+                "WBSM_UPDATE_TASKS": str(snapshot),
+            }
+            if getattr(sys, 'frozen', False):
+                args = [sys.executable]
+            else:
+                args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
+            launch_child_process(args, env=env)
+        except Exception as e:
+            self._restart_pending = False
+            if snapshot is not None:
+                try:
+                    snapshot.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            messagebox.showerror(self._lang["btn_restart_self"], str(e), parent=self.root)
+            return
+        self._quit_for_restart()
+
+    def _quit_for_restart(self):
         # 移除托盘图标并退出（不杀子进程，让运行中的脚本继续）
         if getattr(self, '_nid', None):
             try:
@@ -10471,11 +10632,13 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def run(self):
         self._init_task_features()
+        restarted = self._restore_restarted_tasks()
         if self._should_start_minimized():
             self.root.after(400, self._minimize_main_window)
         self.root.after(0, self._start_ip_load_threads)  # 主循环启动后立即调度，再启动 IP 加载线程
         self._launch_on_start_retry_scheduled = False  # 用于第二轮自动启动重试（仅一次）
-        self.root.after(400, self._do_launch_on_start_items)  # 启动勾选了「启动本工具时自动启动」的任务（400ms 后、在后台线程执行）
+        if not restarted:
+            self.root.after(400, self._do_launch_on_start_items)
         self.root.after(1500, self._do_launch_api_on_start)  # 自动启动 API（若已勾选）
         self.root.after(600, self._update_api_status_label)
         self.root.mainloop()

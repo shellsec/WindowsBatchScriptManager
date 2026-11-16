@@ -19,6 +19,8 @@ Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. 
 
 When upgrading, keep your existing `WindowsBatchScriptManager_scripts.json` and other configuration files.
 
+Starting with v1.3.7, use **Settings → Check for Updates** to check GitHub manually. After confirmation, the Windows single-file EXE downloads and verifies the ZIP, replaces itself, and restarts. The update restart skips tasks configured to launch at startup. Update the standalone API script separately when needed.
+
 ## What you can do
 
 - Start, stop, and restart tasks in groups. View ports, logs, and execution history.

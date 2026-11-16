@@ -1,6 +1,7 @@
 """French interface translations."""
 
 TRANSLATIONS = {
+    "menu_check_update": "Rechercher des mises à jour",
     "msg_confirm_batch_action": "Voulez-vous exécuter cette action sur plusieurs tâches ?",
     "btn_disk_cleanup": "Nettoyer le lecteur C:",
     "window_title": "Gestionnaire de scripts Windows",

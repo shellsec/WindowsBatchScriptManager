@@ -1,6 +1,7 @@
 """German translations for the desktop interface."""
 
 TRANSLATIONS = {
+    "menu_check_update": "Nach Updates suchen",
     "msg_confirm_batch_action": "Möchten Sie diese Aktion für mehrere Aufgaben ausführen?",
     "btn_disk_cleanup": "Laufwerk C: bereinigen",
     "window_title": "Windows Batch Script Manager – Skriptverwaltung",
