@@ -9,7 +9,7 @@ Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. 
 
 [Download for Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [User guide](docs/USER_GUIDE.en-US.md) · [API and MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp)
 
-![English desktop app showing tasks and an HTTP response](docs/screenshots/en-US.jpg)
+![English desktop app showing tasks and an HTTP response](docs/screenshots/en-US.jpg?v=1.3.7)
 
 ## Quick start
 
