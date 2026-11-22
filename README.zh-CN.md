@@ -19,7 +19,7 @@
 
 升级时请保留原有的 `WindowsBatchScriptManager_scripts.json` 和其他配置文件。
 
-从 v1.3.7 起，可通过「设置 → 检查程序更新」手动检查 GitHub 新版。确认后，Windows 单文件版会下载并校验发行包，替换 EXE 后重启。简体和繁体中文界面优先通过加速线路下载 ZIP，失败时回到 GitHub 直连。校验文件始终从 GitHub 获取。更新重启会跳过「启动本工具时自动启动」的任务。独立 API 脚本可按需单独更新。
+从 v1.3.7 起，可通过「设置 → 检查程序更新」手动检查 GitHub 新版。确认后，Windows 单文件版会下载并校验发行包，替换 EXE 后重启。简体和繁体中文界面按顺序尝试 gh-proxy.com、ghfast.top、gh.monlor.com 和 gh.acmsz.top 下载 ZIP，失败时回到 GitHub 直连。校验文件始终从 GitHub 获取。更新重启会跳过「启动本工具时自动启动」的任务。独立 API 脚本可按需单独更新。
 
 ## 核心功能
 

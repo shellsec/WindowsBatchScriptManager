@@ -18,7 +18,12 @@ REPO = "shellsec/WindowsBatchScriptManager"
 RELEASES = f"https://github.com/{REPO}/releases"
 EXE_NAME = "WindowsBatchScriptManager.exe"
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
-UPDATE_MIRROR = "https://gh-proxy.com"
+UPDATE_MIRRORS = (
+    "https://gh-proxy.com",
+    "https://ghfast.top",
+    "https://gh.monlor.com",
+    "https://gh.acmsz.top",
+)
 
 
 @dataclass(frozen=True)
@@ -45,7 +50,7 @@ class _GitHubRedirect(HTTPRedirectHandler):
 def _open(url):
     request = Request(url, headers={"User-Agent": "WindowsBatchScriptManager"})
     host = urlsplit(url).hostname
-    accelerated = host == urlsplit(UPDATE_MIRROR).hostname
+    accelerated = host in {urlsplit(mirror).hostname for mirror in UPDATE_MIRRORS}
     return build_opener(_GitHubRedirect(host if accelerated else None)).open(
         request, timeout=6 if accelerated else 15,
     )
@@ -97,15 +102,18 @@ def stage_update(release, executable, *, language="en-US"):
 
     with tempfile.TemporaryFile() as payload:
         expected = checksum[0].lower()
+        urls = [release.package_url]
         if language in ("zh-CN", "zh-TW"):
+            urls = [f"{mirror}/{release.package_url}" for mirror in UPDATE_MIRRORS] + urls
+        for index, url in enumerate(urls):
+            payload.seek(0)
+            payload.truncate()
             try:
-                _download_package(f"{UPDATE_MIRROR}/{release.package_url}", payload, expected)
+                _download_package(url, payload, expected)
+                break
             except (OSError, HTTPException, ValueError):
-                payload.seek(0)
-                payload.truncate()
-                _download_package(release.package_url, payload, expected)
-        else:
-            _download_package(release.package_url, payload, expected)
+                if index == len(urls) - 1:
+                    raise
         with ZipFile(payload) as archive:
             entries = [entry for entry in archive.infolist() if entry.filename == EXE_NAME]
             if len(entries) != 1 or not 2 <= entries[0].file_size <= MAX_PACKAGE_BYTES:
