@@ -10666,9 +10666,12 @@ class BatchManagerApp(TaskFeatureMixin):
         result = queue.Queue()
         self._update_busy = True
 
+        def progress(stage, details):
+            result.put(("progress", (stage, details)))
+
         def worker():
             try:
-                result.put((True, work()))
+                result.put((True, work(progress)))
             except Exception as exc:
                 result.put((False, exc))
 
@@ -10679,13 +10682,51 @@ class BatchManagerApp(TaskFeatureMixin):
                 self.root.after(150, poll)
                 return
             self._update_busy = False
+            if ok == "progress":
+                self._update_busy = True
+                stage, details = value
+                self._show_update_progress(stage, details)
+                self.root.after(1, poll)
+                return
             if ok:
                 complete(value)
             else:
+                self._show_update_progress('failed', {'error': str(value)})
                 messagebox.showerror(self._lang["menu_check_update"], str(value), parent=self.root)
 
         threading.Thread(target=worker, daemon=True).start()
         self.root.after(150, poll)
+
+    def _show_update_progress(self, stage, details):
+        labels = {
+            'checking': ('正在检查新版（GitHub 官方 API）…', 'Checking for updates (official GitHub API)…'),
+            'checksum': ('正在获取官方 SHA-256 校验文件…', 'Fetching the official SHA-256 checksum…'),
+            'source': ('正在下载，线路：', 'Downloading from: '),
+            'retry': ('线路失败，将尝试下一条可用线路：', 'Source failed; trying the next available source: '),
+            'verifying': ('正在校验下载包 SHA-256…', 'Verifying package SHA-256…'),
+            'extracting': ('校验通过，正在提取新版程序…', 'Checksum verified. Extracting the new executable…'),
+            'failed': ('更新失败：', 'Update failed: '),
+            'latest': ('当前已是最新版本。', 'You are up to date.'),
+            'available': ('发现新版：', 'Update available: '),
+            'cancelled': ('已取消更新。', 'Update cancelled.'),
+            'installing': ('准备替换程序并重启，保留运行中的任务…', 'Preparing to replace and restart the app, preserving running tasks…'),
+        }
+        if stage == 'download':
+            downloaded = details['bytes'] / 1048576
+            total = details['total']
+            amount = f"{downloaded:.2f} MiB"
+            if total:
+                amount += f" / {total / 1048576:.2f} MiB ({min(details['bytes'] / total * 100, 100):.1f}%)"
+            message = self._task_text('更新下载：', 'Update download: ') + amount + f" — {details['speed'] / 1048576:.2f} MiB/s"
+        else:
+            message = self._task_text(*labels[stage])
+            message += details.get('source', '') if stage in ('source', 'retry') else ''
+            if stage in ('retry', 'failed'):
+                message += ' ' + details.get('error', '')
+            if stage == 'available':
+                message += details['version']
+        self.status_var.set(message)
+        self._append_disk_cleanup_log(message)
 
     def _check_program_update(self):
         if getattr(self, "_update_busy", False) or getattr(self, "_restart_pending", False):
@@ -10695,24 +10736,28 @@ class BatchManagerApp(TaskFeatureMixin):
         def checked(release):
             title = self._lang["menu_check_update"]
             if release is None:
+                self._show_update_progress('latest', {})
                 messagebox.showinfo(title, self._task_text("当前已是最新版本。", "You are up to date."), parent=self.root)
                 return
             current = f"v{__version__} → v{release.version}"
+            self._show_update_progress('available', {'version': current})
             if executable is None:
                 prompt = self._task_text("发现新版。打开 GitHub 发布页面？", "An update is available. Open GitHub Releases?")
             else:
                 prompt = self._task_text("下载并安装新版？安装后工具会重启。", "Download and install the update? The application will restart.")
             if not messagebox.askyesno(title, f"{current}\n\n{prompt}", default=messagebox.NO, parent=self.root):
+                self._show_update_progress('cancelled', {})
                 return
             if executable is None:
                 webbrowser.open(program_update.RELEASES)
                 return
             self.status_var.set(self._task_text("正在下载并验证更新…", "Downloading and verifying the update…"))
             language = self._current_language
-            self._run_update_job(lambda: program_update.stage_update(release, executable, language=language),
+            self._run_update_job(lambda progress: program_update.stage_update(release, executable, language=language, progress=progress),
                                  lambda staged: self._install_program_update(executable, staged))
 
-        self._run_update_job(lambda: program_update.check_release(__version__), checked)
+        self._show_update_progress('checking', {})
+        self._run_update_job(lambda progress: program_update.check_release(__version__), checked)
 
     def _restart_waits_for_tasks(self):
         pending = getattr(self, "_task_queue", None)
@@ -10742,14 +10787,20 @@ class BatchManagerApp(TaskFeatureMixin):
     def _install_program_update(self, executable, staged):
         if self._restart_waits_for_tasks():
             self._update_busy = True
-            self.status_var.set(self._task_text(
+            waiting_message = self._task_text(
                 "新版已下载，等待队列和任务串联完成后安装。",
                 "Update downloaded. Installation will begin after queued tasks and workflows finish.",
-            ))
+            )
+            self.status_var.set(waiting_message)
+            if not getattr(self, '_update_wait_logged', False):
+                self._append_disk_cleanup_log(waiting_message)
+                self._update_wait_logged = True
             self.root.after(1000, lambda: self._install_program_update(executable, staged))
             return
         self._update_busy = False
+        self._update_wait_logged = False
         try:
+            self._show_update_progress('installing', {})
             self._save_config()
             program_update.write_running_tasks(staged, self._running_tasks_for_restart())
             program_update.launch_installer(launch_child_process, executable, staged)
@@ -10759,6 +10810,7 @@ class BatchManagerApp(TaskFeatureMixin):
                     file.unlink(missing_ok=True)
                 except OSError:
                     pass
+            self._show_update_progress('failed', {'error': str(exc)})
             messagebox.showerror(self._lang["menu_check_update"], str(exc), parent=self.root)
             return
         self._quit_for_restart()

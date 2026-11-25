@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zipfile import ZipFile
@@ -60,7 +61,9 @@ def _version(value):
     return tuple(map(int, value.split(".")))
 
 
-def check_release(current):
+def check_release(current, *, progress=None):
+    if progress:
+        progress('checking', {'source': 'api.github.com'})
     with _open(f"https://api.github.com/repos/{REPO}/releases/latest") as response:
         data = json.loads(response.read(1024 * 1024 + 1))
     tag = data["tag_name"]
@@ -79,22 +82,34 @@ def check_release(current):
     return Release(version, package, checksum)
 
 
-def _download_package(url, payload, expected_digest):
+def _download_package(url, payload, expected_digest, *, progress=None):
     digest = hashlib.sha256()
     total = 0
     with _open(url) as response:
+        length = response.headers.get('Content-Length', '')
+        expected_size = int(length) if length.isdigit() else 0
+        started = last_report = time.monotonic()
         while chunk := response.read(128 * 1024):
             total += len(chunk)
             if total > MAX_PACKAGE_BYTES:
                 raise ValueError("Update package is too large.")
             digest.update(chunk)
             payload.write(chunk)
+            now = time.monotonic()
+            if progress and now - last_report >= 0.5:
+                progress('download', {'bytes': total, 'total': expected_size, 'speed': total / max(now - started, 0.001)})
+                last_report = now
+        if progress:
+            progress('download', {'bytes': total, 'total': expected_size, 'speed': total / max(time.monotonic() - started, 0.001)})
+            progress('verifying', {})
     if digest.hexdigest() != expected_digest:
         raise ValueError("SHA-256 verification failed.")
 
 
-def stage_update(release, executable, *, language="en-US"):
+def stage_update(release, executable, *, language="en-US", progress=None):
     name = release.package_url.rsplit("/", 1)[-1]
+    if progress:
+        progress('checksum', {'source': 'github.com'})
     with _open(release.checksum_url) as response:
         checksum = response.read(4096).decode("ascii").split()
     if len(checksum) != 2 or checksum[1].lstrip("*") != name or not re.fullmatch(r"[a-fA-F0-9]{64}", checksum[0]):
@@ -109,12 +124,20 @@ def stage_update(release, executable, *, language="en-US"):
             payload.seek(0)
             payload.truncate()
             try:
-                _download_package(url, payload, expected)
+                if progress:
+                    progress('source', {'source': urlsplit(url).hostname})
+                    _download_package(url, payload, expected, progress=progress)
+                else:
+                    _download_package(url, payload, expected)
                 break
-            except (OSError, HTTPException, ValueError):
+            except (OSError, HTTPException, ValueError) as exc:
+                if progress:
+                    progress('retry', {'source': urlsplit(url).hostname, 'error': str(exc)})
                 if index == len(urls) - 1:
                     raise
         with ZipFile(payload) as archive:
+            if progress:
+                progress('extracting', {})
             entries = [entry for entry in archive.infolist() if entry.filename == EXE_NAME]
             if len(entries) != 1 or not 2 <= entries[0].file_size <= MAX_PACKAGE_BYTES:
                 raise ValueError("Invalid executable in the update package.")
