@@ -62,6 +62,7 @@ class TaskFeatureMixin:
         menubar = self.root.nametowidget(self.root.cget('menu'))
         previous_menu = getattr(self, '_task_tools_menu', None)
         if previous_menu is not None:
+            menubar.delete(self._program_update_menu_index)
             menubar.delete(self._task_tools_menu_index)
             previous_menu.destroy()
         menu=tk.Menu(self.root,tearoff=0)
@@ -78,6 +79,8 @@ class TaskFeatureMixin:
         menubar.add_cascade(label=self._task_text('任务增强', 'Task tools'), menu=menu)
         self._task_tools_menu = menu
         self._task_tools_menu_index = menubar.index('end')
+        menubar.add_command(label=self._lang['menu_check_update'], command=self._check_program_update)
+        self._program_update_menu_index = menubar.index('end')
 
     def _selected_feature_item(self):
         rows=self._get_selected_rows()

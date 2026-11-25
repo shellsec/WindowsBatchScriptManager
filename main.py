@@ -5792,9 +5792,6 @@ class BatchManagerApp(TaskFeatureMixin):
         self._settings_menu.add_separator()
         self._settings_menu.add_command(label=self._lang.get("menu_restore_bak", "从上次备份恢复配置"), command=self._on_restore_config_bak)
         self._settings_menu.add_command(label=self._lang.get("menu_global_hotkeys", "快捷键说明"), command=self._on_show_hotkeys)
-        self._settings_menu.add_separator()
-        self._settings_menu.add_command(label=self._lang["menu_check_update"], command=self._check_program_update)
-        self._settings_menu.add_command(label=self._lang.get("menu_about", "关于"), command=self._on_about)
         
         # 开机/登录自启：Windows 注册表；Mac launchd；Linux systemd user
         self._startup_var = tk.BooleanVar(value=_is_startup_enabled())
@@ -6517,7 +6514,7 @@ class BatchManagerApp(TaskFeatureMixin):
             pass
         for menu, keys in (
             (self._settings_menu, ("menu_close_to_tray", "menu_minimize_to_tray",
-                                   "menu_restore_bak", "menu_global_hotkeys", "menu_check_update", "menu_about")),
+                                   "menu_restore_bak", "menu_global_hotkeys")),
             (self._refresh_menu, ("btn_pause_refresh", "btn_resume_refresh")),
         ):
             updated_labels = {previous_labels[key]: self._lang[key] for key in keys

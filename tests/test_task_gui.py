@@ -58,7 +58,14 @@ class TkSmoke(unittest.TestCase):
             app.items=[{'id':1,'name':'one','path':'one.py'},{'id':2,'name':'two','path':'two.py'}]
             app._get_selected_rows=lambda:[0];app._item_at=lambda row:app.items[row];app._app_config={}
             app._sync_tree=Mock();app._save_config=Mock()
+            app._lang = {'menu_check_update': 'Check for Updates'}
             with patch.object(main,'load_app_config',return_value={}):app._init_task_features()
+            menu = root.nametowidget(root.cget('menu'))
+            self.assertEqual(menu.entrycget(menu.index('end'), 'label'), 'Check for Updates')
+            app._lang = {'menu_check_update': '检查程序更新'}
+            app._refresh_task_menu_language()
+            self.assertEqual(menu.entrycget(menu.index('end'), 'label'), '检查程序更新')
+            self.assertEqual(menu.index('end'), app._task_tools_menu_index + 1)
             app._edit_completion_rules();app._show_task_queue();app._choose_task_environment();app._preview_script_import([])
             root.update_idletasks()
             self.assertGreaterEqual(len(root.winfo_children()),5)
