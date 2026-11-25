@@ -1,6 +1,7 @@
 """Russian UI translations."""
 
 TRANSLATIONS = {
+    "btn_scan_caches": "Поиск кэша на дисках",
     "menu_check_update": "Проверить обновления",
     "msg_confirm_batch_action": "Выполнить это действие для нескольких задач?",
     "btn_disk_cleanup": "Очистка диска C:",

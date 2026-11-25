@@ -32,8 +32,9 @@ Starting with v1.3.7, use **Settings → Check for Updates** to check GitHub man
 Schedules, queues, and follow-up tasks run while the desktop app is open. [Task management guide](docs/TASK_MANAGEMENT.md)
 
 ## C: drive cleanup
+Starting with v1.3.9, **Clean up C: drive** removes recognized `.tmp` / `.temp` files without an age limit, thumbnail caches, supported browser and shader caches, inactive task logs, and crash dumps. Results appear in the lower log pane. Protected application/task paths and running browser caches are skipped; the Recycle Bin is kept.
 
-In v1.3.4, **Clean up C: drive** sits next to **Open tool folder**. It runs in the background and shows each result in the lower pane. It removes `.tmp` and `.temp` files last modified more than seven days ago from the current user’s and Windows’ temporary directories on C:, clears the current user’s thumbnail cache on C:, **permanently empties the C: Recycle Bin without confirmation**, and flushes DNS. It uses the current permissions and keeps the Windows Update cache, Prefetch, and system logs.
+**Scan drive caches** lists recognized cache locations on local fixed drives for the current user, rather than scanning arbitrary folders. Items are unchecked by default. Optional entries include Prefetch, individual system restore points, and disabling hibernation. Review the deletion impact before confirming. Right-click an entry to show its file/folder or copy its path; these actions are unavailable for restore points. Hibernation requires administrator permissions and also disables Fast Startup. If Windows leaves `hiberfil.sys` behind, the app reports the failure without counting the space as reclaimed; it does not forcibly delete the file.
 
 ## Remote API and MCP
 

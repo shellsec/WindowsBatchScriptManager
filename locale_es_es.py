@@ -1,6 +1,7 @@
 """Spanish UI translations."""
 
 TRANSLATIONS = {
+    "btn_scan_caches": "Analizar cachés de unidades",
     "menu_check_update": "Buscar actualizaciones",
     "msg_confirm_batch_action": "¿Quieres ejecutar esta acción en varias tareas?",
     "btn_disk_cleanup": "Limpiar unidad C:",

@@ -1,6 +1,7 @@
 """Korean UI translations."""
 
 TRANSLATIONS = {
+    "btn_scan_caches": "전체 드라이브 캐시 검색",
     "menu_check_update": "업데이트 확인",
     "msg_confirm_batch_action": "여러 작업에 이 동작을 실행하시겠습니까?",
     "btn_disk_cleanup": "C 드라이브 정리",

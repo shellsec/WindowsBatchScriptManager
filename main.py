@@ -372,6 +372,7 @@ LANGUAGES = {
         "btn_stop_all_batch": "停止软件外所有批处理",
         "btn_open_tool_folder": "打开工具目录",
         "btn_disk_cleanup": "一键清理 C 盘",
+        "btn_scan_caches": "全盘缓存扫描",
         "msg_clear_invalid_confirm": "发现 %d 个路径失效或无效的项（脚本不存在或路径为空），是否一键删除？",
         "msg_no_invalid": "未发现路径失效或无效的项。",
         "status_cleared_invalid": "已清除 %d 个无效项",
@@ -928,6 +929,7 @@ LANGUAGES = {
         "btn_stop_all_batch": "Stop All Batch",
         "btn_open_tool_folder": "Open tool folder",
         "btn_disk_cleanup": "Clean up C: drive",
+        "btn_scan_caches": "Scan drive caches",
         "msg_clear_invalid_confirm": "Found %d items with missing or invalid script path (file not found or path empty). Delete them?",
         "msg_no_invalid": "No invalid items found.",
         "status_cleared_invalid": "Cleared %d invalid items",
@@ -2140,8 +2142,8 @@ class DiskCleanupPathError(ValueError):
         self.chinese = chinese
 
 
-def clean_cache_files(directory: Path, *, thumbnails=False) -> tuple[int, int, int]:
-    """Remove old temporary files or thumbnail databases without following redirects."""
+def clean_cache_files(directory: Path, *, thumbnails=False, protected=()) -> tuple[int, int, int]:
+    """Remove recognized temporary files or thumbnail databases, preserving active folders."""
     reparse = stat.FILE_ATTRIBUTE_REPARSE_POINT
     if directory.drive.upper() != "C:" or not directory.is_absolute() or ".." in directory.parts:
         raise DiskCleanupPathError("临时文件目录必须位于 C 盘。", "Temporary files directory must be on C:.")
@@ -2153,12 +2155,16 @@ def clean_cache_files(directory: Path, *, thumbnails=False) -> tuple[int, int, i
                 "Temporary files directory contains a redirected path.",
             )
 
-    cutoff = time.time() - 7 * 24 * 60 * 60
     removed = total_bytes = skipped = 0
     pending = [directory]
+    protected = [Path(path).resolve() for path in protected if path]
     while pending:
         folder = pending.pop()
         try:
+            resolved = folder.resolve()
+            if any(resolved == path or path in resolved.parents for path in protected):
+                skipped += 1
+                continue
             info = folder.lstat()
             if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & reparse:
                 continue
@@ -2177,7 +2183,7 @@ def clean_cache_files(directory: Path, *, thumbnails=False) -> tuple[int, int, i
                         if thumbnails:
                             if not (name.startswith("thumbcache_") and name.endswith(".db")):
                                 continue
-                        elif not name.endswith((".tmp", ".temp")) or info.st_mtime >= cutoff:
+                        elif not name.endswith((".tmp", ".temp")):
                             continue
                         os.unlink(entry.path)
                     except FileNotFoundError:
@@ -5872,11 +5878,16 @@ class BatchManagerApp(TaskFeatureMixin):
         self.btn_open_tool_folder = ttk.Button(row1b, text=self._lang["btn_open_tool_folder"], command=self._on_open_tool_folder)
         self.btn_open_tool_folder.pack(side=tk.LEFT, padx=2)
         self.btn_disk_cleanup = None
+        self.btn_scan_caches = None
         if sys.platform == "win32":
             self.btn_disk_cleanup = ttk.Button(
                 row1b, text=self._lang["btn_disk_cleanup"], command=self._on_disk_cleanup
             )
             self.btn_disk_cleanup.pack(side=tk.LEFT, padx=2)
+            self.btn_scan_caches = ttk.Button(
+                row1b, text=self._lang["btn_scan_caches"], command=self._on_scan_caches,
+            )
+            self.btn_scan_caches.pack(side=tk.LEFT, padx=2)
         # API 服务（独立管理，默认 WindowsBatchScriptManager_api_server.py，不加入任务列表）
         row_api = ttk.Frame(ops_block)
         row_api.pack(fill=tk.X, pady=(0, 3))
@@ -6385,6 +6396,7 @@ class BatchManagerApp(TaskFeatureMixin):
         self.btn_open_tool_folder.config(text=self._lang["btn_open_tool_folder"])
         if self.btn_disk_cleanup is not None:
             self.btn_disk_cleanup.config(text=self._lang["btn_disk_cleanup"])
+            self.btn_scan_caches.config(text=self._lang["btn_scan_caches"])
         if getattr(self, "btn_restart_self", None):
             self.btn_restart_self.config(text=self._lang["btn_restart_self"])
         if getattr(self, "btn_shutdown", None):
@@ -9665,6 +9677,191 @@ class BatchManagerApp(TaskFeatureMixin):
         self._on_select(None)
         self.detail_text.see(tk.END)
 
+    def _on_scan_caches(self):
+        import cache_cleanup
+
+        text = self._task_text
+        window = tk.Toplevel(self.root)
+        window.title(self._lang["btn_scan_caches"])
+        window.geometry("900x460")
+        window.transient(self.root)
+        status = tk.StringVar(value=text("正在扫描缓存…", "Scanning caches…"))
+        ttk.Label(window, textvariable=status).pack(anchor=tk.W, padx=8, pady=8)
+        tree = ttk.Treeview(window, columns=("selected", "name", "size", "path", "impact"), show="headings")
+        for column, label, width in (
+            ("selected", text("选择", "Select"), 60), ("name", text("项目", "Item"), 110),
+            ("size", text("大小 (MiB)", "Size (MiB)"), 100), ("path", text("路径", "Path"), 380),
+            ("impact", text("删除影响", "Deletion impact"), 220),
+        ):
+            tree.heading(column, text=label)
+            tree.column(column, width=width, stretch=column == "path")
+        scroll = ttk.Scrollbar(window, command=tree.yview)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(fill=tk.BOTH, expand=True, padx=8)
+        caches = {}
+        selected = set()
+        jobs = queue.Queue()
+
+        def toggle(event=None):
+            for ident in tree.selection():
+                if caches[ident].kind == "notice":
+                    continue
+                if ident in selected:
+                    selected.remove(ident)
+                else:
+                    selected.add(ident)
+                tree.set(ident, "selected", "☑" if ident in selected else "☐")
+
+        tree.bind("<Double-1>", toggle)
+        tree.bind("<space>", toggle)
+
+        def selected_path():
+            rows = tree.selection()
+            cache = caches.get(rows[0]) if rows else None
+            if cache is None or cache.kind in ("restore", "notice"):
+                return None
+            return cache.path
+
+        def locate():
+            path = selected_path()
+            if path is None:
+                return
+            try:
+                if not path.exists():
+                    messagebox.showinfo(window.title(), text(
+                        "文件或目录已不存在，可能已被清理。", "The file or folder no longer exists. It may have been cleaned."), parent=window)
+                    return
+                if path.is_dir():
+                    os.startfile(str(path))
+                else:
+                    subprocess.Popen(["explorer.exe", "/select,", str(path)])
+            except OSError as exc:
+                messagebox.showerror(window.title(), str(exc), parent=window)
+
+        def copy_path():
+            path = selected_path()
+            if path is not None:
+                window.clipboard_clear()
+                window.clipboard_append(str(path))
+
+        context = tk.Menu(window, tearoff=0)
+        context.add_command(label=text("定位文件或目录", "Show file or folder"), command=locate)
+        context.add_command(label=text("复制路径", "Copy path"), command=copy_path)
+
+        def show_context(event):
+            ident = tree.identify_row(event.y)
+            if not ident:
+                return
+            tree.selection_set(ident)
+            tree.focus(ident)
+            state = tk.NORMAL if selected_path() is not None else tk.DISABLED
+            context.entryconfigure(0, state=state)
+            context.entryconfigure(1, state=state)
+            try:
+                context.tk_popup(event.x_root, event.y_root)
+            finally:
+                context.grab_release()
+
+        tree.bind("<Button-3>", show_context)
+
+        def clean():
+            if not selected:
+                return
+            prompt = text(
+                "删除勾选的项目？日志和转储删除后无法用于排障，删除还原点将失去对应恢复机会。Prefetch 清理后首次启动可能变慢。",
+                "Delete the checked items? Logs and dumps will be unavailable for troubleshooting. Deleted restore points cannot be used for recovery. Clearing Prefetch may slow the next launch.",
+            )
+            if any(caches[ident].kind == "hibernate" for ident in selected):
+                prompt += "\n\n" + text(
+                    "关闭休眠会释放 hiberfil.sys，并关闭休眠、快速启动及依赖休眠文件的混合睡眠，需要管理员权限。",
+                    "Disabling hibernation releases hiberfil.sys and disables hibernation, Fast Startup and hybrid sleep. Administrator permissions are required.",
+                )
+            if not messagebox.askyesno(
+                self._lang["btn_scan_caches"],
+                prompt,
+                default=messagebox.NO, parent=window,
+            ):
+                return
+            button.state(["disabled"])
+            targets = [caches[ident] for ident in selected]
+
+            def worker():
+                try:
+                    for cache in targets:
+                        try:
+                            result = cache_cleanup.remove(cache)
+                            jobs.put(("log", f"{cache.name} — {cache.path}\n{text('删除 / 字节 / 跳过', 'Removed / bytes / skipped')}: {result[0]} / {result[1]:,} / {result[2]}"))
+                        except (OSError, subprocess.TimeoutExpired) as exc:
+                            jobs.put(("log", f"{cache.name}: {exc}"))
+                    jobs.put(("cleaned", None))
+                except Exception as exc:
+                    jobs.put(("error", str(exc)))
+            threading.Thread(target=worker, daemon=True).start()
+
+        button = ttk.Button(window, text=text("清理勾选项目", "Clean checked items"), command=clean)
+        button.pack(anchor=tk.E, padx=8, pady=8)
+        button.state(["disabled"])
+
+        active_logs = [item["_log_path"] for item in self.items
+                       if item.get("_log_path") and item.get("pid") and is_process_running(item["pid"])]
+        log_directory = CONFIG_PATH.parent / "logs"
+
+        def scan_worker():
+            try:
+                jobs.put(("scanned", cache_cleanup.scan(
+                    include_optional=True, log_directory=log_directory, excluded=active_logs,
+                    include_system_optional=True,
+                )))
+            except Exception as exc:
+                jobs.put(("error", str(exc)))
+
+        def poll():
+            while True:
+                try:
+                    kind, value = jobs.get_nowait()
+                except queue.Empty:
+                    window.after(150, poll)
+                    return
+                if kind == "scanned":
+                    for index, cache in enumerate(sorted(value, key=lambda c: c.size, reverse=True)):
+                        ident = str(index)
+                        caches[ident] = cache
+                        if cache.kind == "logs":
+                            name = text("任务旧日志", "Task logs")
+                            impact = text("失去历史记录", "History will be removed")
+                        elif cache.kind == "dumps":
+                            name = text("崩溃转储", "Crash dumps")
+                            impact = text("失去故障分析资料", "Troubleshooting data will be removed")
+                        elif cache.kind == "prefetch":
+                            name = "Prefetch"
+                            impact = text("首次启动可能变慢", "The next launch may be slower")
+                        elif cache.kind == "restore":
+                            name = text("系统还原点", "System restore point")
+                            impact = text("失去此还原点的恢复机会", "Recovery using this point will be lost")
+                        elif cache.kind == "hibernate":
+                            name = text("关闭休眠并释放空间", "Disable hibernation and free space")
+                            impact = text("关闭休眠和快速启动；需管理员权限", "Disables hibernation and Fast Startup; requires administrator")
+                        elif cache.kind == "notice":
+                            name = text("扫描受限", "Scan unavailable")
+                            impact = text("请检查管理员权限", "Check administrator permissions")
+                        else:
+                            name = cache.name
+                            impact = text("应用可重新生成", "Applications can rebuild")
+                        display_path = cache.name if cache.kind in ("restore", "notice") else str(cache.path)
+                        size = "—" if cache.kind in ("restore", "notice") else f"{cache.size / 1048576:,.2f}"
+                        tree.insert("", tk.END, iid=ident, values=("☐", name, size, display_path, impact))
+                    status.set(text("扫描完成，双击或按空格勾选缓存。", "Scan complete. Double-click or press Space to check caches."))
+                    button.state(["!disabled"])
+                elif kind == "log":
+                    self._append_disk_cleanup_log(value)
+                else:
+                    status.set(value if kind == "error" else text("清理完成，详情见主窗口下方日志。", "Cleanup complete. See the log in the main window."))
+                    return
+
+        threading.Thread(target=scan_worker, daemon=True).start()
+        window.after(150, poll)
+
     def _on_disk_cleanup(self):
         """Start the preset C: cleanup directly and report the result."""
         log = queue.Queue()
@@ -9672,29 +9869,54 @@ class BatchManagerApp(TaskFeatureMixin):
         text = self._task_text
         local_data = os.environ.get("LOCALAPPDATA")
         windows = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+        protected = [getattr(sys, "_MEIPASS", ""), Path(get_app_path()).parent]
+        active_logs = []
+        for item in self.items:
+            if item.get("pid") and is_process_running(item["pid"]):
+                if item.get("_log_path"):
+                    active_logs.append(item["_log_path"])
+                protected.append(effective_work_dir(item))
+                path = item.get("path", "")
+                if path and not _is_http_task_item(item):
+                    protected.append(Path(path).resolve().parent)
         scope = text(
-            "开始一键清理。临时文件限超过 7 天未修改的 .tmp / .temp，C 盘回收站将永久清空。",
-            "Starting cleanup. Temporary files are limited to .tmp and .temp files older than 7 days. The C: Recycle Bin will be emptied permanently.",
+            "开始清理 C 盘缓存和 .tmp / .temp 临时文件，无文件年龄限制。回收站保留。",
+            "Cleaning C: caches and .tmp / .temp files without an age limit. The Recycle Bin is kept.",
         )
         self._append_disk_cleanup_log(scope)
 
         def clean_local_cache(relative_path, *, thumbnails=False):
             if not local_data:
                 raise DiskCleanupPathError("未找到 LOCALAPPDATA。", "LOCALAPPDATA is unavailable.")
-            return clean_cache_files(Path(local_data) / relative_path, thumbnails=thumbnails)
+            return clean_cache_files(Path(local_data) / relative_path, thumbnails=thumbnails, protected=protected)
+
+        def clean_c_caches():
+            import cache_cleanup
+            totals = [0, 0, 0]
+            for cache in cache_cleanup.scan(
+                drive="C:", include_optional=True,
+                log_directory=CONFIG_PATH.parent / "logs", excluded=active_logs,
+            ):
+                result = cache_cleanup.remove(cache)
+                for index, value in enumerate(result):
+                    totals[index] += value
+                log.put(f"{cache.name} — {cache.path}: {result[0]} / {result[1]:,} / {result[2]}")
+            return tuple(totals)
 
         steps = (
             (text("用户临时文件", "User temporary files"), lambda: clean_local_cache("Temp")),
-            (text("系统临时文件", "System temporary files"), lambda: clean_cache_files(windows / "Temp")),
+            (text("系统临时文件", "System temporary files"), lambda: clean_cache_files(windows / "Temp", protected=protected)),
             (text("缩略图缓存", "Thumbnail cache"), lambda: clean_local_cache(
                 r"Microsoft\Windows\Explorer", thumbnails=True,
             )),
-            (text("C 盘回收站", "C: Recycle Bin"), empty_c_drive_recycle_bin),
+            (text("应用缓存", "Application caches"), clean_c_caches),
             (text("DNS 缓存", "DNS cache"), flush_windows_dns_cache),
         )
 
         def clean():
+            import shutil
             try:
+                free_before = shutil.disk_usage("C:\\").free
                 for index, (label, action) in enumerate(steps, 1):
                     prefix = f"[{index}/{len(steps)}] {label}"
                     log.put(prefix + "…")
@@ -9723,6 +9945,13 @@ class BatchManagerApp(TaskFeatureMixin):
                     "保留 Windows 更新缓存、Prefetch 和系统日志。",
                     "Windows Update cache, Prefetch and system logs were kept.",
                 ))
+                freed = shutil.disk_usage("C:\\").free - free_before
+                log.put(text(
+                    "C 盘净可用空间变化：%s MiB（包含其他程序同时写入的影响，删除量见各项日志）。",
+                    "C: net free space change: %s MiB (includes concurrent writes; see each item's deletion totals).",
+                ) % f"{freed / 1048576:+,.2f}")
+            except Exception as exc:
+                log.put(text("清理未完成：%s", "Cleanup did not complete: %s") % exc)
             finally:
                 log.put(None)
 

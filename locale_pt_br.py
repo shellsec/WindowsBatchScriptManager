@@ -1,6 +1,7 @@
 """Brazilian Portuguese interface translations."""
 
 TRANSLATIONS = {
+    "btn_scan_caches": "Verificar caches das unidades",
     "menu_check_update": "Verificar atualizações",
     "msg_confirm_batch_action": "Deseja executar esta ação em várias tarefas?",
     "btn_disk_cleanup": "Limpar unidade C:",

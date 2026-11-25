@@ -1,6 +1,7 @@
 """Traditional Chinese (Taiwan) translations for the desktop interface."""
 
 TRANSLATIONS = {
+    "btn_scan_caches": "全磁碟快取掃描",
     "menu_check_update": "檢查程式更新",
     "msg_confirm_batch_action": "確定要執行這項批次操作嗎？",
     "btn_disk_cleanup": "一鍵清理 C 槽",

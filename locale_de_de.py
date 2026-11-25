@@ -1,6 +1,7 @@
 """German translations for the desktop interface."""
 
 TRANSLATIONS = {
+    "btn_scan_caches": "Laufwerkscaches scannen",
     "menu_check_update": "Nach Updates suchen",
     "msg_confirm_batch_action": "Möchten Sie diese Aktion für mehrere Aufgaben ausführen?",
     "btn_disk_cleanup": "Laufwerk C: bereinigen",
