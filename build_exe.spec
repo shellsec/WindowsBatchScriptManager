@@ -10,6 +10,9 @@ ROOT = os.path.dirname(os.path.abspath(SPEC))
 ICON = os.path.join(ROOT, "tray_icon_5728293646040626821.ico")
 DATAS = [(ICON, ".")] if os.path.isfile(ICON) else []
 DATAS.append((os.path.join(ROOT, "remote_access.ps1"), "."))
+for filename in ("LICENSE", "NOTICE", "LICENSE-MIT", "LICENSE-APACHE-2.0", "THIRD_PARTY_NOTICES.md"):
+    DATAS.append((os.path.join(ROOT, filename), "."))
+DATAS.append((os.path.join(ROOT, "third_party_licenses"), "third_party_licenses"))
 SSH_INSTALLER = os.environ.get("WBSM_OPENSSH_MSI")
 if SSH_INSTALLER:
     installer = Path(SSH_INSTALLER).resolve()

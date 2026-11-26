@@ -4,7 +4,7 @@ Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. 
 
 **Give Codex or Claude Code access to a Windows target.** Enable Remote Access in WBSM and copy the connection details so your AI coding agent can run PowerShell over SSH and transfer files over SFTP.
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
@@ -12,6 +12,31 @@ Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. 
 [Download for Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [User guide](docs/USER_GUIDE.en-US.md) · [AI remote access](#ai-remote-access) · [API and MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp)
 
 ![English desktop app showing tasks and an HTTP response](docs/screenshots/en-US.jpg?v=1.3.7)
+
+## When WBSM helps
+
+Two main uses: manage ongoing script tasks on Windows, and give an AI agent SSH/SFTP access for deployment and maintenance. Use either independently.
+
+| Your situation | How WBSM helps |
+| --- | --- |
+| An existing Windows machine already runs scanners, collectors, builds or other business workloads, and migrating its environment is impractical. | Manage scripts and configure remote access on the existing Windows installation. |
+| Scripts are scattered across folders, with different startup commands, arguments and interpreters. | Keep task definitions together; use templates, folder import and per-task runtime settings. |
+| Jobs need schedules, concurrency limits, automatic restart or a follow-up step after success/failure. | The running manager provides scheduling, queues, keep-alive and completion rules without configuring Windows Task Scheduler for each job. |
+| Routine deployment and troubleshooting repeatedly require Remote Desktop sessions. | Enable OpenSSH and a dedicated account, then let Codex or Claude Code use SSH for commands and SFTP for files within that account's permissions. |
+| Failures are hard to investigate across separate consoles. | Inspect recorded output, execution history and HTTP responses in the panel. File logging must be enabled for supported script types. |
+| An AI client needs to operate tasks already registered in the panel. | The optional HTTP/MCP service lists tasks, checks process status and starts, stops or restarts them. |
+| Restarting the manager during an update could launch startup tasks again. | The update restart skips launch-on-app-start tasks and checks saved process identities when restoring running tasks. This does not promise recovery after every system or process failure. |
+| Several Windows machines each run their own workloads. | Keep task managers on each host and maintain hosts individually over SSH, using aliases to identify targets. No central multi-host dashboard is provided. |
+
+**Runtime boundaries.** Scheduling, queue processing and keep-alive require the manager process to remain running; they do not continue merely because a script process survives. OpenSSH runs as a separate service, and disconnecting the maintenance client does not itself stop manager-owned tasks. Commands started directly over SSH have their own session and process behavior. GUI-only applications may still require an interactive desktop. A running process is not proof that its business work is healthy; application health checks and full SSH command auditing are not implied.
+
+The standalone API Python script is optional for local task management and SSH/SFTP access. It is required for the HTTP API and task MCP service, with its own Python dependencies. See [task management](docs/TASK_MANAGEMENT.md) and [remote access](docs/WINDOWS_REMOTE_ACCESS.md).
+
+## Enterprise use cases
+
+For small operations and development teams maintaining existing Windows business machines: scanners, collectors, build hosts, scheduled data processing and backup scripts. Keep the existing OS and runtime environment, manage tasks locally, and use AI-assisted SSH maintenance when needed.
+
+Task management, SSH maintenance and the optional task MCP are separate entry points. This is not a central fleet-management platform or a promise of unattended recovery. Validate permissions, update/recovery behavior and sustained operation in your own environment before production deployment.
 
 ## Quick start
 
@@ -75,13 +100,18 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 Use the `X-API-Key` header for HTTP requests. The MCP endpoint is `http://<server>:8765/mcp`. For example, a desktop HTTP task can send `POST /start?id=10` to start task 10 on the server. [API and MCP reference](docs/USER_GUIDE.en-US.md#remote-api-and-mcp)
 
+Starting with v1.3.13, WBSM provides read-only `get_task_logs` and `get_task_result` MCP tools. Update both the API script and manager source/EXE before using them. [Task diagnostics and limitations](docs/MCP_TASK_DIAGNOSTICS.md)
+
 ## Documentation
 
 - [CLI and automation](docs/USER_GUIDE.en-US.md#command-line-cli)
 - [Run from source on Windows, macOS, or Linux](docs/USER_GUIDE.en-US.md#how-to-run)
 - [Build the Windows EXE](PYINSTALLER.md)
-- [Contributing](CONTRIBUTING.md) · [Apache-2.0 license](LICENSE) · [Notices](NOTICE)
+- [Contributing](CONTRIBUTING.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE)
 
 ## Support the project
 
 [Sponsor on Afdian](https://ifdian.net/a/shellsec) · [aiv123.com](https://aiv123.com/) · [ofox.ai](https://ofox.io/x/aiv123) · [TOKEN2ROI (AI Top-Ups)](https://token2roi.com/)
+
+
+AGPL-3.0-only applies from v1.3.13. Commercial use is permitted; distribution and modified network deployments have corresponding-source obligations. [License and dependency notices](THIRD_PARTY_NOTICES.md).

@@ -40,3 +40,7 @@
 3. 运行：`python main.py`
 
 再次感谢您的贡献！
+
+## Contribution license
+
+Contributions to v1.3.13 and later are accepted under AGPL-3.0-only. Retain third-party notices and identify externally sourced code and its license. Only submit work you have the right to contribute.

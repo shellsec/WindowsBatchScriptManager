@@ -4,7 +4,7 @@
 
 **让 Codex、Claude Code 直接操作 Windows 目标机。** 在 WBSM 中启用远程运维并复制接入信息，AI 就能通过 SSH 执行 PowerShell，通过 SFTP 上传和下载文件。
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
@@ -12,6 +12,31 @@
 [下载 Windows 版](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [使用手册](docs/USER_GUIDE.zh-CN.md) · [AI 远程运维](#ai-远程运维) · [API 与 MCP](docs/USER_GUIDE.zh-CN.md#远程-api-与-mcp)
 
 ![简体中文界面展示任务列表和 HTTP 返回结果](docs/screenshots/zh-CN.jpg)
+
+## 适合哪些场景
+
+两大用途：在 Windows 上管理持续运行的脚本任务，以及让 AI 通过 SSH/SFTP 部署和维护机器。两者可以独立使用。
+
+| 你遇到的问题 | WBSM 如何帮助 |
+| --- | --- |
+| Windows 已经承担扫描、采集、构建等业务，现有环境不方便迁移或重装。 | 在现有 Windows 上集中管理脚本、配置远程接入。 |
+| 脚本分散在不同目录，启动命令、参数和解释器容易忘记。 | 集中保存任务配置，支持模板、文件夹导入和每项任务的运行环境选择。 |
+| 任务需要定时、限制并发、异常后拉起，或根据结果执行下一步。 | 由运行中的管理器提供定时、队列、保活和后续任务规则，无需逐项配置 Windows 任务计划程序。 |
+| 每次部署、查日志和排错，都要登录远程桌面。 | 配置 OpenSSH 和专用账号，让 Codex、Claude Code 在账号权限范围内通过 SSH 执行命令、SFTP 传输文件。 |
+| 多个控制台分散，任务失败后难找线索。 | 在面板查看已记录的输出、执行历史和 HTTP 返回结果；支持的脚本类型需要先开启日志记录。 |
+| 希望 AI 操作面板中已经登记的任务。 | 可选 HTTP/MCP 服务提供任务列表、进程状态查询以及启停、重启接口。 |
+| 更新重启管理器时，担心启动任务重复运行。 | 更新重启跳过“启动本工具时自动启动”的任务，恢复运行任务时核对保存的进程身份；不承诺所有系统或进程故障都能自动恢复。 |
+| 多台 Windows 各自承担业务，希望按需远程维护。 | 每台独立运行管理器，通过 SSH 别名区分目标并分别维护；目前不提供集中多机面板。 |
+
+**运行边界：**定时、队列和保活依赖管理器进程持续运行，脚本进程仍在并不代表调度也在继续。OpenSSH 作为独立服务运行，维护端断开本身不会停止管理器管理的任务；直接通过 SSH 启动的命令，其存活取决于具体会话和启动方式。必须操作图形界面的程序仍可能需要交互桌面。进程存在不等于业务健康，当前能力不代表已具备应用健康检查或完整 SSH 命令审计。
+
+本地任务管理和 SSH/SFTP 接入不要求独立 API 脚本存在；HTTP API 和任务 MCP 服务需要 `WindowsBatchScriptManager_api_server.py` 及其 Python 依赖。[任务管理说明](docs/TASK_MANAGEMENT.md) · [远程接入说明](docs/WINDOWS_REMOTE_ACCESS.md)
+
+## 企业使用场景
+
+适合已有多台 Windows 业务机、维护人员有限的运维和研发团队，例如扫描机、采集机、构建机、定时数据处理和备份任务。保留现有系统与运行环境，本地集中管理每台机器的任务，需要部署、查日志和排错时再让 AI 通过 SSH 接入。
+
+任务管理、SSH 维护与可选任务 MCP 是独立入口。目前不是集中多机运维平台，也不承诺无人值守下所有故障自动恢复。正式使用前，请在本单位环境验证权限、升级恢复和持续运行行为。
 
 ## 快速开始
 
@@ -75,13 +100,18 @@ python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-
 
 HTTP 请求带上 `X-API-Key`。MCP 地址为 `http://<服务器地址>:8765/mcp`。例如，桌面端的 HTTP 任务可发送 `POST /start?id=10` 启动服务器上的任务 10。[API 与 MCP 参考](docs/USER_GUIDE.zh-CN.md#远程-api-与-mcp)
 
+v1.3.13 新增只读 MCP 工具 `get_task_logs`（日志查询）和 `get_task_result`（执行记录查询），使用前需同时更新 API 脚本和主程序源码/EXE。[查询方式与限制](docs/MCP_TASK_DIAGNOSTICS.md)
+
 ## 文档
 
 - [命令行与自动化](docs/USER_GUIDE.zh-CN.md#命令行cli)
 - [Windows、macOS 和 Linux 源码运行](docs/USER_GUIDE.zh-CN.md#运行方式)
 - [Windows 打包说明](PYINSTALLER.md)
-- [贡献指南](CONTRIBUTING.md) · [Apache-2.0 许可证](LICENSE) · [版权声明](NOTICE)
+- [贡献指南](CONTRIBUTING.md) · [AGPL-3.0 许可证](LICENSE) · [版权声明](NOTICE)
 
 ## 支持项目
 
 [爱发电](https://ifdian.net/a/shellsec) · [aiv123.com](https://aiv123.com/) · [ofox.ai](https://ofox.io/x/aiv123) · [TOKEN2ROI（AI 代充）](https://token2roi.com/)
+
+
+从 v1.3.13 起使用 AGPL-3.0-only。允许商用；再分发和修改版网络部署须履行对应源码提供义务。仅内部修改并不等于必须公开到 GitHub。[许可与依赖说明](THIRD_PARTY_NOTICES.md)。

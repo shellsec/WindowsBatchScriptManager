@@ -1,5 +1,18 @@
 WindowsBatchScriptManager
 Copyright 2026 Windows Batch Script Manager Contributors
 
-Earlier project code was distributed under the MIT License.
-See LICENSE-MIT for the original copyright and permission notice.
+Starting with v1.3.13, this combined project is distributed under
+GNU Affero General Public License version 3 only (AGPL-3.0-only).
+Copyright holders retain their copyright. This release changes licensing,
+adds MCP task diagnostics, and updates enterprise use-case documentation.
+
+Required historical attribution: earlier code was distributed under MIT
+and Apache-2.0. LICENSE-MIT and LICENSE-APACHE-2.0 preserve those terms and
+notices for incorporated earlier code; they are not alternative licenses
+for this combined release. Previously granted licenses are not revoked.
+
+Third-party components retain their own licenses. See THIRD_PARTY_NOTICES.md
+and third_party_licenses/. OpenSSH is a separate, unmodified installer.
+
+Corresponding source, build instructions and release notices:
+https://github.com/shellsec/WindowsBatchScriptManager/releases/tag/v1.3.13

@@ -1,0 +1,180 @@
+[
+  {
+    "name": "psutil",
+    "version": "7.2.2",
+    "license": "BSD-3-Clause",
+    "files": [
+      "third_party_licenses/psutil/LICENSE"
+    ]
+  },
+  {
+    "name": "Pillow",
+    "version": "12.3.0",
+    "license": "MIT-CMU",
+    "files": [
+      "third_party_licenses/Pillow/LICENSE"
+    ]
+  },
+  {
+    "name": "PyInstaller",
+    "version": "6.22.3",
+    "license": "GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)",
+    "files": [
+      "third_party_licenses/PyInstaller/COPYING.txt"
+    ]
+  },
+  {
+    "name": "pyinstaller-hooks-contrib",
+    "version": "2026.9",
+    "license": "",
+    "files": [
+      "third_party_licenses/pyinstaller-hooks-contrib/LICENSE"
+    ]
+  },
+  {
+    "name": "pefile",
+    "version": "2024.8.26",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/pefile/LICENSE"
+    ]
+  },
+  {
+    "name": "altgraph",
+    "version": "0.17.5",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/altgraph/LICENSE"
+    ]
+  },
+  {
+    "name": "packaging",
+    "version": "26.3",
+    "license": "Apache-2.0 OR BSD-2-Clause",
+    "files": [
+      "third_party_licenses/packaging/LICENSE",
+      "third_party_licenses/packaging/LICENSE.APACHE",
+      "third_party_licenses/packaging/LICENSE.BSD"
+    ]
+  },
+  {
+    "name": "pywin32-ctypes",
+    "version": "0.2.3",
+    "license": "BSD-3-Clause",
+    "files": [
+      "third_party_licenses/pywin32-ctypes/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "fastapi",
+    "version": "0.162.0",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/fastapi/LICENSE"
+    ]
+  },
+  {
+    "name": "uvicorn",
+    "version": "0.54.0",
+    "license": "BSD-3-Clause",
+    "files": [
+      "third_party_licenses/uvicorn/LICENSE.md"
+    ]
+  },
+  {
+    "name": "starlette",
+    "version": "1.7.0",
+    "license": "BSD-3-Clause",
+    "files": [
+      "third_party_licenses/starlette/LICENSE.md"
+    ]
+  },
+  {
+    "name": "pydantic",
+    "version": "2.14.2",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/pydantic/LICENSE"
+    ]
+  },
+  {
+    "name": "pydantic_core",
+    "version": "2.50.2",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/pydantic_core/LICENSE"
+    ]
+  },
+  {
+    "name": "anyio",
+    "version": "4.16.0",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/anyio/LICENSE"
+    ]
+  },
+  {
+    "name": "h11",
+    "version": "0.16.0",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/h11/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "click",
+    "version": "8.5.0",
+    "license": "BSD-3-Clause",
+    "files": [
+      "third_party_licenses/click/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "typing_extensions",
+    "version": "4.16.0",
+    "license": "PSF-2.0",
+    "files": [
+      "third_party_licenses/typing_extensions/LICENSE"
+    ]
+  },
+  {
+    "name": "annotated-types",
+    "version": "0.8.0",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/annotated-types/LICENSE"
+    ]
+  },
+  {
+    "name": "typing-inspection",
+    "version": "0.4.5",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/typing-inspection/LICENSE"
+    ]
+  },
+  {
+    "name": "annotated-doc",
+    "version": "0.0.5",
+    "license": "MIT",
+    "files": [
+      "third_party_licenses/annotated-doc/LICENSE"
+    ]
+  },
+  {
+    "name": "idna",
+    "version": "3.20",
+    "license": "BSD-3-Clause",
+    "files": [
+      "third_party_licenses/idna/LICENSE.md"
+    ]
+  },
+  {
+    "name": "exceptiongroup",
+    "version": "1.3.1",
+    "license": "",
+    "files": [
+      "third_party_licenses/exceptiongroup/LICENSE"
+    ]
+  }
+]
