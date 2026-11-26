@@ -1,7 +1,8 @@
 """Korean UI translations."""
 
 TRANSLATIONS = {
-    "btn_scan_caches": "전체 드라이브 캐시 검색",
+    "msg_hibernation_hidden": "hiberfil.sys는 숨겨진 보호된 시스템 파일입니다. 위치를 열어도 보이지 않으면 파일 탐색기의 폴더 옵션 → 보기에서 숨김 파일, 폴더 및 드라이브 표시를 선택하고 보호된 운영 체제 파일 숨기기(권장)를 해제하세요. 확인 후에는 원래 표시 설정으로 복원하는 것이 좋습니다.",
+    "btn_scan_caches": "디스크 정리 미리 보기",
     "menu_check_update": "업데이트 확인",
     "msg_confirm_batch_action": "여러 작업에 이 동작을 실행하시겠습니까?",
     "btn_disk_cleanup": "C 드라이브 정리",

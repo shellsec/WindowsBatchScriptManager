@@ -1,7 +1,8 @@
 """German translations for the desktop interface."""
 
 TRANSLATIONS = {
-    "btn_scan_caches": "Laufwerkscaches scannen",
+    "msg_hibernation_hidden": "hiberfil.sys ist eine versteckte, geschützte Systemdatei. Falls sie nach dem Öffnen des Speicherorts nicht sichtbar ist, öffnen Sie im Explorer die Ordneroptionen → Ansicht, aktivieren Sie die Anzeige versteckter Dateien, Ordner und Laufwerke und deaktivieren Sie das Ausblenden geschützter Systemdateien (empfohlen). Stellen Sie anschließend die ursprünglichen Anzeigeoptionen wieder her.",
+    "btn_scan_caches": "Datenträgerbereinigung – Vorschau",
     "menu_check_update": "Nach Updates suchen",
     "msg_confirm_batch_action": "Möchten Sie diese Aktion für mehrere Aufgaben ausführen?",
     "btn_disk_cleanup": "Laufwerk C: bereinigen",

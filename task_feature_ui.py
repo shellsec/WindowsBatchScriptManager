@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 import time
 import tkinter as tk
@@ -61,10 +62,6 @@ class TaskFeatureMixin:
     def _refresh_task_menu_language(self):
         menubar = self.root.nametowidget(self.root.cget('menu'))
         previous_menu = getattr(self, '_task_tools_menu', None)
-        if previous_menu is not None:
-            menubar.delete(self._program_update_menu_index)
-            menubar.delete(self._task_tools_menu_index)
-            previous_menu.destroy()
         menu=tk.Menu(self.root,tearoff=0)
         templates=tk.Menu(menu,tearoff=0)
         for kind,label in [('python','Python'),('node','Node.js'),('powershell','PowerShell'),('batch',self._task_text('批处理', 'Batch'))]:
@@ -76,11 +73,27 @@ class TaskFeatureMixin:
         menu.add_separator()
         menu.add_command(label=self._task_text('并发上限', 'Concurrency'),command=self._set_task_limit)
         menu.add_command(label=self._task_text('查看/取消排队', 'Queue'),command=self._show_task_queue)
-        menubar.add_cascade(label=self._task_text('任务增强', 'Task tools'), menu=menu)
+        task_label = self._task_text('任务增强', 'Task tools')
+        remote_label = self._task_text('远程运维', 'Remote Access')
+        update_label = self._lang['menu_check_update']
+        if previous_menu is None:
+            menubar.add_cascade(label=task_label, menu=menu)
+            self._task_tools_menu_index = menubar.index('end')
+            self._remote_access_menu_index = None
+            if sys.platform == 'win32':
+                from remote_access import show_remote_access
+
+                menubar.add_command(label=remote_label, command=lambda: show_remote_access(self.root))
+                self._remote_access_menu_index = menubar.index('end')
+            menubar.add_command(label=update_label, command=self._check_program_update)
+            self._program_update_menu_index = menubar.index('end')
+        else:
+            menubar.entryconfig(self._task_tools_menu_index, label=task_label, menu=menu)
+            if self._remote_access_menu_index is not None:
+                menubar.entryconfig(self._remote_access_menu_index, label=remote_label)
+            menubar.entryconfig(self._program_update_menu_index, label=update_label)
+            previous_menu.destroy()
         self._task_tools_menu = menu
-        self._task_tools_menu_index = menubar.index('end')
-        menubar.add_command(label=self._lang['menu_check_update'], command=self._check_program_update)
-        self._program_update_menu_index = menubar.index('end')
 
     def _selected_feature_item(self):
         rows=self._get_selected_rows()

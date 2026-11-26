@@ -65,7 +65,11 @@ class TkSmoke(unittest.TestCase):
             app._lang = {'menu_check_update': '检查程序更新'}
             app._refresh_task_menu_language()
             self.assertEqual(menu.entrycget(menu.index('end'), 'label'), '检查程序更新')
-            self.assertEqual(menu.index('end'), app._task_tools_menu_index + 1)
+            if main.sys.platform == 'win32':
+                self.assertEqual(menu.index('end'), app._task_tools_menu_index + 2)
+                self.assertEqual(menu.entrycget(menu.index('end') - 1, 'label'), 'Remote Access')
+            else:
+                self.assertEqual(menu.index('end'), app._task_tools_menu_index + 1)
             app._edit_completion_rules();app._show_task_queue();app._choose_task_environment();app._preview_script_import([])
             root.update_idletasks()
             self.assertGreaterEqual(len(root.winfo_children()),5)

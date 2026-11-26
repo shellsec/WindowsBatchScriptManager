@@ -4,6 +4,8 @@
 
 Gérez les scripts batch, Python, Node.js et PowerShell sous Windows avec la planification, la file d’attente et l’API distante.
 
+Pour utiliser Codex ou Claude Code à distance, activez SSH/SFTP dans WBSM sous Windows. Sous Linux et macOS, utilisez le service SSH existant sur le port 22 par défaut. [Configuration et exemples](README.md#ai-remote-access)
+
 [Télécharger pour Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 ## Démarrage rapide
 

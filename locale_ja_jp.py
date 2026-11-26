@@ -1,7 +1,8 @@
 """Japanese interface translations."""
 
 TRANSLATIONS = {
-    "btn_scan_caches": "全ドライブのキャッシュを検索",
+    "msg_hibernation_hidden": "hiberfil.sys は非表示の保護されたシステムファイルです。場所を開いても表示されない場合は、エクスプローラーの「フォルダー オプション → 表示」で隠しファイル、フォルダー、ドライブを表示し、「保護されたオペレーティング システム ファイルを表示しない（推奨）」をオフにしてください。確認後は元の表示設定に戻すことをお勧めします。",
+    "btn_scan_caches": "ディスク クリーンアップのプレビュー",
     "menu_check_update": "更新を確認",
     "msg_confirm_batch_action": "この操作を複数のタスクに実行しますか？",
     "btn_disk_cleanup": "C ドライブのクリーンアップ",

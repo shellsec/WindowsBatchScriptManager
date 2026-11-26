@@ -4,6 +4,8 @@
 
 Gestiona scripts por lotes, Python, Node.js y PowerShell en Windows con programación, cola de ejecución y API remota.
 
+Para acceder con Codex o Claude Code, activa SSH/SFTP desde WBSM en Windows. En Linux y macOS, utiliza el servicio SSH existente, con el puerto 22 por defecto. [Configuración y ejemplos](README.md#ai-remote-access)
+
 [Descargar para Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 ## Inicio rápido
 

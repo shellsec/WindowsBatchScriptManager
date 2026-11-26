@@ -372,7 +372,7 @@ LANGUAGES = {
         "btn_stop_all_batch": "停止软件外所有批处理",
         "btn_open_tool_folder": "打开工具目录",
         "btn_disk_cleanup": "一键清理 C 盘",
-        "btn_scan_caches": "全盘缓存扫描",
+        "btn_scan_caches": "磁盘清理预览",
         "msg_clear_invalid_confirm": "发现 %d 个路径失效或无效的项（脚本不存在或路径为空），是否一键删除？",
         "msg_no_invalid": "未发现路径失效或无效的项。",
         "status_cleared_invalid": "已清除 %d 个无效项",
@@ -409,6 +409,7 @@ LANGUAGES = {
         "menu_help": "帮助",
         "menu_about": "关于",
         "menu_check_update": "检查程序更新",
+        "msg_hibernation_hidden": "hiberfil.sys 是隐藏且受保护的系统文件。若定位后看不到，请在资源管理器的“文件夹选项 → 查看”中选择“显示隐藏的文件、文件夹和驱动器”，并取消“隐藏受保护的操作系统文件（推荐）”。查看后建议恢复隐藏设置。",
         "msg_about": "Windows Batch Script Manager\n版本: %s",
         "tray_show": "显示主窗口",
         "tray_quit": "退出",
@@ -929,7 +930,7 @@ LANGUAGES = {
         "btn_stop_all_batch": "Stop All Batch",
         "btn_open_tool_folder": "Open tool folder",
         "btn_disk_cleanup": "Clean up C: drive",
-        "btn_scan_caches": "Scan drive caches",
+        "btn_scan_caches": "Disk cleanup preview",
         "msg_clear_invalid_confirm": "Found %d items with missing or invalid script path (file not found or path empty). Delete them?",
         "msg_no_invalid": "No invalid items found.",
         "status_cleared_invalid": "Cleared %d invalid items",
@@ -966,6 +967,7 @@ LANGUAGES = {
         "menu_help": "Help",
         "menu_about": "About",
         "menu_check_update": "Check for Updates",
+        "msg_hibernation_hidden": "hiberfil.sys is a hidden, protected system file. If it is not visible after locating it, open File Explorer's Folder Options → View, select Show hidden files, folders, and drives, and clear Hide protected operating system files (Recommended). Restore these visibility settings afterwards.",
         "msg_about": "Windows Batch Script Manager\nVersion: %s",
         "tray_show": "Show window",
         "tray_quit": "Quit",
@@ -5806,6 +5808,7 @@ class BatchManagerApp(TaskFeatureMixin):
                 command=self._on_startup_disable,
             )
             menubar.add_cascade(label=self._lang.get("menu_startup", "开机启动"), menu=self._startup_menu)
+
         
         # 工具栏：统一外层内边距，各行从左顺序排列，避免「右侧拖拽区」与下行错位
         _tpad = (8, 6, 8, 2)
@@ -8623,7 +8626,43 @@ class BatchManagerApp(TaskFeatureMixin):
         self.status_var.set(self._lang["status_schedule_paused"] if self._schedule_paused else self._lang["status_schedule_resumed"])
 
     def _format_window_title(self) -> str:
-        return f"{self._lang['window_title']}  v{__version__}"
+        title = f"{self._lang['window_title']}  v{__version__}"
+        if sys.platform == "win32":
+            if getattr(self, "_remote_access_active", False):
+                title += "  |  " + self._task_text("远程运维已开启", "Remote access enabled")
+            title += f"  |  {Path(get_app_path()).parent}"
+        return title
+
+    def _refresh_remote_access_title(self, start_if_configured=False):
+        from remote_access import _configure, _load_connection_info, _service_status, starts_with_wbsm
+
+        result = queue.SimpleQueue()
+
+        def check():
+            info = _load_connection_info()
+            enabled = info.get("enabled") is True
+            status = _service_status() if enabled else None
+            if start_if_configured and status == "Stopped" and starts_with_wbsm():
+                try:
+                    reply = _configure({"action": "service-start"})
+                    status = reply.get("serviceStatus", status)
+                except (OSError, ValueError):
+                    pass
+            result.put(enabled and status == "Running")
+
+        def apply_status():
+            try:
+                active = result.get_nowait()
+            except queue.Empty:
+                self.root.after(150, apply_status)
+                return
+            if active != getattr(self, "_remote_access_active", False):
+                self._remote_access_active = active
+                self.root.title(self._format_window_title())
+            self.root.after(10000, self._refresh_remote_access_title)
+
+        threading.Thread(target=check, daemon=True).start()
+        self.root.after(150, apply_status)
 
     def _on_about(self):
         messagebox.showinfo(
@@ -9732,6 +9771,9 @@ class BatchManagerApp(TaskFeatureMixin):
                 if path.is_dir():
                     os.startfile(str(path))
                 else:
+                    rows = tree.selection()
+                    if rows and caches[rows[0]].kind == "hibernate":
+                        messagebox.showinfo(window.title(), self._lang["msg_hibernation_hidden"], parent=window)
                     subprocess.Popen(["explorer.exe", "/select,", str(path)])
             except OSError as exc:
                 messagebox.showerror(window.title(), str(exc), parent=window)
@@ -9742,9 +9784,35 @@ class BatchManagerApp(TaskFeatureMixin):
                 window.clipboard_clear()
                 window.clipboard_append(str(path))
 
+        def copy_hibernation_commands():
+            window.clipboard_clear()
+            window.clipboard_append(
+                "powercfg.exe /hibernate off\n"
+                """cmd.exe /d /c 'del /f /q /a "%SystemDrive%\\hiberfil.sys"'\n"""
+                'Get-Item -Force -LiteralPath "$env:SystemDrive\\hiberfil.sys"'
+            )
+            messagebox.showinfo(window.title(), text(
+                "已复制三行命令。\n\n"
+                "在开始菜单搜索 Windows PowerShell，右键选择「以管理员身份运行」，在权限提示中点「是」。"
+                "确认窗口标题是「管理员：Windows PowerShell」，将三行命令粘贴到 PS> 后按回车。\n\n"
+                "第一行关闭休眠和快速启动，第二行尝试强制删除残留的 hiberfil.sys。"
+                "第三行检查文件，提示「找不到路径」表示文件已移除。",
+                "Three commands copied.\n\n"
+                "Search for Windows PowerShell in Start, right-click it, choose Run as administrator, "
+                "and select Yes. Confirm the title is Administrator: Windows PowerShell, "
+                "then paste the three lines at the PS> prompt and press Enter.\n\n"
+                "The first line disables hibernation and Fast Startup. The second tries to forcibly delete any remaining hiberfil.sys. "
+                "The third checks for the file. "
+                "A path-not-found message means the file has been removed.",
+            ), parent=window)
+
         context = tk.Menu(window, tearoff=0)
         context.add_command(label=text("定位文件或目录", "Show file or folder"), command=locate)
         context.add_command(label=text("复制路径", "Copy path"), command=copy_path)
+        context.add_command(
+            label=text("复制关闭休眠命令", "Copy commands to disable hibernation"),
+            command=copy_hibernation_commands,
+        )
 
         def show_context(event):
             ident = tree.identify_row(event.y)
@@ -9755,6 +9823,7 @@ class BatchManagerApp(TaskFeatureMixin):
             state = tk.NORMAL if selected_path() is not None else tk.DISABLED
             context.entryconfigure(0, state=state)
             context.entryconfigure(1, state=state)
+            context.entryconfigure(2, state=tk.NORMAL if caches[ident].kind == "hibernate" else tk.DISABLED)
             try:
                 context.tk_popup(event.x_root, event.y_root)
             finally:
@@ -10910,6 +10979,8 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def run(self):
         self._init_task_features()
+        if sys.platform == "win32":
+            self._refresh_remote_access_title(start_if_configured=True)
         restarted = self._restore_restarted_tasks()
         if self._should_start_minimized():
             self.root.after(400, self._minimize_main_window)

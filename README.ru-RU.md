@@ -4,6 +4,8 @@
 
 Управляйте пакетными файлами, сценариями Python, Node.js и PowerShell в Windows. Доступны расписание, очередь выполнения и удалённый API.
 
+Для удалённой работы в Codex или Claude Code включите SSH/SFTP в WBSM на Windows. В Linux и macOS используйте имеющуюся службу SSH, по умолчанию на порту 22. [Настройка и примеры](README.md#ai-remote-access)
+
 [Скачать для Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 ## Быстрый старт
 

@@ -1,7 +1,8 @@
 """Spanish UI translations."""
 
 TRANSLATIONS = {
-    "btn_scan_caches": "Analizar cachés de unidades",
+    "msg_hibernation_hidden": "hiberfil.sys es un archivo del sistema oculto y protegido. Si no aparece al abrir su ubicación, vaya a Opciones de carpeta → Ver en el Explorador, muestre los archivos, carpetas y unidades ocultos y desmarque Ocultar archivos protegidos del sistema operativo (recomendado). Después, restaure la configuración de visualización anterior.",
+    "btn_scan_caches": "Vista previa de limpieza de disco",
     "menu_check_update": "Buscar actualizaciones",
     "msg_confirm_batch_action": "¿Quieres ejecutar esta acción en varias tareas?",
     "btn_disk_cleanup": "Limpiar unidad C:",

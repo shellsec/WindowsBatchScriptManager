@@ -4,6 +4,8 @@
 
 在 Windows 上管理批次檔、Python、Node.js 與 PowerShell 工作，支援排程、佇列及遠端 API。
 
+要讓 Codex 或 Claude Code 遠端操作，Windows 可用 WBSM 一鍵啟用 SSH/SFTP。Linux 和 macOS 直接使用已有的 SSH/SFTP，預設連接埠為 22。[設定與使用情境](README.zh-CN.md#ai-远程运维)
+
 [下載 Windows 版](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 ## 快速開始
 

@@ -1,7 +1,8 @@
 """French interface translations."""
 
 TRANSLATIONS = {
-    "btn_scan_caches": "Analyser les caches des lecteurs",
+    "msg_hibernation_hidden": "hiberfil.sys est un fichier système masqué et protégé. Si vous ne le voyez pas après avoir ouvert son emplacement, ouvrez Options des dossiers → Affichage dans l’Explorateur, affichez les fichiers, dossiers et lecteurs cachés et décochez Masquer les fichiers protégés du système d’exploitation (recommandé). Rétablissez ensuite les paramètres d’affichage précédents.",
+    "btn_scan_caches": "Aperçu du nettoyage de disque",
     "menu_check_update": "Rechercher des mises à jour",
     "msg_confirm_batch_action": "Voulez-vous exécuter cette action sur plusieurs tâches ?",
     "btn_disk_cleanup": "Nettoyer le lecteur C:",

@@ -4,6 +4,8 @@
 
 Windows でバッチ、Python、Node.js、PowerShell のタスクを管理できます。スケジュール、実行キュー、リモート API に対応しています。
 
+Codex や Claude Code でリモート操作するには、Windows では WBSM から SSH/SFTP を有効にします。Linux と macOS では既存の SSH サービス（既定ポート 22）を使います。[設定と使用例](README.md#ai-remote-access)
+
 [Windows 版をダウンロード](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 ## クイックスタート
 

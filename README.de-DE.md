@@ -4,6 +4,8 @@
 
 Verwaltet Batchdateien, Python-, Node.js- und PowerShell-Skripte unter Windows mit Zeitplänen, Warteschlange und Remote-API.
 
+Für KI-gestützten Fernzugriff mit Codex oder Claude Code aktivieren Sie SSH/SFTP unter Windows in WBSM. Linux und macOS nutzen den vorhandenen SSH-Dienst, standardmäßig über Port 22. [Einrichtung und Beispiele](README.md#ai-remote-access)
+
 [Für Windows herunterladen](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 ## Schnellstart
 

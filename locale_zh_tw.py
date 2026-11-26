@@ -1,7 +1,8 @@
 """Traditional Chinese (Taiwan) translations for the desktop interface."""
 
 TRANSLATIONS = {
-    "btn_scan_caches": "全磁碟快取掃描",
+    "msg_hibernation_hidden": "hiberfil.sys 是隱藏且受保護的系統檔案。若定位後看不到，請在檔案總管的「資料夾選項 → 檢視」中選取「顯示隱藏的檔案、資料夾及磁碟機」，並取消「隱藏受保護的作業系統檔案（建議使用）」。查看後建議恢復隱藏設定。",
+    "btn_scan_caches": "磁碟清理預覽",
     "menu_check_update": "檢查程式更新",
     "msg_confirm_batch_action": "確定要執行這項批次操作嗎？",
     "btn_disk_cleanup": "一鍵清理 C 槽",
