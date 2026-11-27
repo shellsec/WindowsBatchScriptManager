@@ -4,7 +4,7 @@
 
 - 中英文完整说明、八种其他语言快速指南与十张运行截图互相链接。截图由真实程序渲染，任务与 IP 均为示例。
 - Windows 发布方式为一个单文件 EXE 和一个 API 脚本。服务器继续使用已有的 Python 与 API 依赖。
-- 从 v1.3.13 起主许可证为 AGPL-3.0-only；旧版授权不撤回。保留早期 MIT 代码的版权与许可声明，参见 [LICENSE](../LICENSE)、[NOTICE](../NOTICE) 和 [LICENSE-MIT](../LICENSE-MIT)。
+- 从 v1.3.13 起主许可证为 AGPL-3.0-only；旧版授权不撤回。保留早期 MIT 代码的版权与许可声明，参见 [LICENSE](../LICENSE)、[NOTICE](../NOTICE) 和 [历史 MIT 声明](../third_party_licenses/historical/MIT.txt)。
 - 本机任务配置、API 配置、语言配置、执行历史和日志已在忽略规则中。公开发布前仍需复查待提交文件与 Git 历史。
 - 构建方式、升级保留配置和双文件部署均已写入 README。
 

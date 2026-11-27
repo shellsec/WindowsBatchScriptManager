@@ -1,6 +1,6 @@
 # Third-party notices and compatibility review — v1.3.13
 
-The combined WBSM release uses **AGPL-3.0-only**. Third-party components retain their original licenses. Preserved MIT and Apache-2.0 historical project notices are attribution for incorporated earlier code, not an alternative license for this combined release.
+The combined WBSM release uses **AGPL-3.0-only**. Third-party components retain their original licenses. Preserved MIT and Apache-2.0 historical project notices in `third_party_licenses/historical/` are attribution for incorporated earlier code, not an alternative license for this combined release.
 
 ## Review scope and result
 

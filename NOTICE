@@ -7,7 +7,7 @@ Copyright holders retain their copyright. This release changes licensing,
 adds MCP task diagnostics, and updates enterprise use-case documentation.
 
 Required historical attribution: earlier code was distributed under MIT
-and Apache-2.0. LICENSE-MIT and LICENSE-APACHE-2.0 preserve those terms and
+and Apache-2.0. third_party_licenses/historical/MIT.txt and Apache-2.0.txt preserve those terms and
 notices for incorporated earlier code; they are not alternative licenses
 for this combined release. Previously granted licenses are not revoked.
 
