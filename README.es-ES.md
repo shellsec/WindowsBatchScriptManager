@@ -1,10 +1,10 @@
 # WindowsBatchScriptManager · Español
 
-[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.md) · [English](README.en-US.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
 Gestiona scripts por lotes, Python, Node.js y PowerShell en Windows con programación, cola de ejecución y API remota.
 
-Para acceder con Codex o Claude Code, activa SSH/SFTP desde WBSM en Windows. En Linux y macOS, utiliza el servicio SSH existente, con el puerto 22 por defecto. [Configuración y ejemplos](README.md#ai-remote-access)
+Para acceder con Codex o Claude Code, activa SSH/SFTP desde WBSM en Windows. En Linux y macOS, utiliza el servicio SSH existente, con el puerto 22 por defecto. [Configuración y ejemplos](README.en-US.md#ai-remote-access)
 
 [Descargar para Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 

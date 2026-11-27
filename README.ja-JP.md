@@ -1,10 +1,10 @@
 # WindowsBatchScriptManager · 日本語
 
-[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.md) · [English](README.en-US.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
 Windows でバッチ、Python、Node.js、PowerShell のタスクを管理できます。スケジュール、実行キュー、リモート API に対応しています。
 
-Codex や Claude Code でリモート操作するには、Windows では WBSM から SSH/SFTP を有効にします。Linux と macOS では既存の SSH サービス（既定ポート 22）を使います。[設定と使用例](README.md#ai-remote-access)
+Codex や Claude Code でリモート操作するには、Windows では WBSM から SSH/SFTP を有効にします。Linux と macOS では既存の SSH サービス（既定ポート 22）を使います。[設定と使用例](README.en-US.md#ai-remote-access)
 
 [Windows 版をダウンロード](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 

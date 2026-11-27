@@ -1,70 +1,70 @@
 # WindowsBatchScriptManager
 
-Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. Schedule jobs, queue runs, and control tasks remotely through HTTP or MCP.
+用一个 Windows 桌面工具管理批处理、Python、Node.js 和 PowerShell 脚本。支持定时、队列，以及通过 HTTP API 或 MCP 远程操作任务。
 
-**Give Codex or Claude Code access to a Windows target.** Enable Remote Access in WBSM and copy the connection details so your AI coding agent can run PowerShell over SSH and transfer files over SFTP.
+**让 Codex、Claude Code 直接操作 Windows 目标机。** 在 WBSM 中启用远程运维并复制接入信息，AI 就能通过 SSH 执行 PowerShell，通过 SFTP 上传和下载文件。
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
-[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.md) · [English](README.en-US.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
-[Download for Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [User guide](docs/USER_GUIDE.en-US.md) · [AI remote access](#ai-remote-access) · [API and MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp)
+[下载 Windows 版](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [使用手册](docs/USER_GUIDE.zh-CN.md) · [AI 远程运维](#ai-远程运维) · [API 与 MCP](docs/USER_GUIDE.zh-CN.md#远程-api-与-mcp)
 
-![English desktop app showing tasks and an HTTP response](docs/screenshots/en-US.jpg?v=1.3.7)
+![简体中文界面展示任务列表和 HTTP 返回结果](docs/screenshots/zh-CN.jpg)
 
-## When WBSM helps
+## 适合哪些场景
 
-Two main uses: manage ongoing script tasks on Windows, and give an AI agent SSH/SFTP access for deployment and maintenance. Use either independently.
+两大用途：在 Windows 上管理持续运行的脚本任务，以及让 AI 通过 SSH/SFTP 部署和维护机器。两者可以独立使用。
 
-| Your situation | How WBSM helps |
+| 你遇到的问题 | WBSM 如何帮助 |
 | --- | --- |
-| An existing Windows machine already runs scanners, collectors, builds or other business workloads, and migrating its environment is impractical. | Manage scripts and configure remote access on the existing Windows installation. |
-| Scripts are scattered across folders, with different startup commands, arguments and interpreters. | Keep task definitions together; use templates, folder import and per-task runtime settings. |
-| Jobs need schedules, concurrency limits, automatic restart or a follow-up step after success/failure. | The running manager provides scheduling, queues, keep-alive and completion rules without configuring Windows Task Scheduler for each job. |
-| Routine deployment and troubleshooting repeatedly require Remote Desktop sessions. | Enable OpenSSH and a dedicated account, then let Codex or Claude Code use SSH for commands and SFTP for files within that account's permissions. |
-| Failures are hard to investigate across separate consoles. | Inspect recorded output, execution history and HTTP responses in the panel. File logging must be enabled for supported script types. |
-| An AI client needs to operate tasks already registered in the panel. | The optional HTTP/MCP service lists tasks, checks process status and starts, stops or restarts them. |
-| Restarting the manager during an update could launch startup tasks again. | The update restart skips launch-on-app-start tasks and checks saved process identities when restoring running tasks. This does not promise recovery after every system or process failure. |
-| Several Windows machines each run their own workloads. | Keep task managers on each host and maintain hosts individually over SSH, using aliases to identify targets. No central multi-host dashboard is provided. |
+| Windows 已经承担扫描、采集、构建等业务，现有环境不方便迁移或重装。 | 在现有 Windows 上集中管理脚本、配置远程接入。 |
+| 脚本分散在不同目录，启动命令、参数和解释器容易忘记。 | 集中保存任务配置，支持模板、文件夹导入和每项任务的运行环境选择。 |
+| 任务需要定时、限制并发、异常后拉起，或根据结果执行下一步。 | 由运行中的管理器提供定时、队列、保活和后续任务规则，无需逐项配置 Windows 任务计划程序。 |
+| 每次部署、查日志和排错，都要登录远程桌面。 | 配置 OpenSSH 和专用账号，让 Codex、Claude Code 在账号权限范围内通过 SSH 执行命令、SFTP 传输文件。 |
+| 多个控制台分散，任务失败后难找线索。 | 在面板查看已记录的输出、执行历史和 HTTP 返回结果；支持的脚本类型需要先开启日志记录。 |
+| 希望 AI 操作面板中已经登记的任务。 | 可选 HTTP/MCP 服务提供任务列表、进程状态查询以及启停、重启接口。 |
+| 更新重启管理器时，担心启动任务重复运行。 | 更新重启跳过“启动本工具时自动启动”的任务，恢复运行任务时核对保存的进程身份；不承诺所有系统或进程故障都能自动恢复。 |
+| 多台 Windows 各自承担业务，希望按需远程维护。 | 每台独立运行管理器，通过 SSH 别名区分目标并分别维护；目前不提供集中多机面板。 |
 
-**Runtime boundaries.** Scheduling, queue processing and keep-alive require the manager process to remain running; they do not continue merely because a script process survives. OpenSSH runs as a separate service, and disconnecting the maintenance client does not itself stop manager-owned tasks. Commands started directly over SSH have their own session and process behavior. GUI-only applications may still require an interactive desktop. A running process is not proof that its business work is healthy; application health checks and full SSH command auditing are not implied.
+**运行边界：**定时、队列和保活依赖管理器进程持续运行，脚本进程仍在并不代表调度也在继续。OpenSSH 作为独立服务运行，维护端断开本身不会停止管理器管理的任务；直接通过 SSH 启动的命令，其存活取决于具体会话和启动方式。必须操作图形界面的程序仍可能需要交互桌面。进程存在不等于业务健康，当前能力不代表已具备应用健康检查或完整 SSH 命令审计。
 
-The standalone API Python script is optional for local task management and SSH/SFTP access. It is required for the HTTP API and task MCP service, with its own Python dependencies. See [task management](docs/TASK_MANAGEMENT.md) and [remote access](docs/WINDOWS_REMOTE_ACCESS.md).
+本地任务管理和 SSH/SFTP 接入不要求独立 API 脚本存在；HTTP API 和任务 MCP 服务需要 `WindowsBatchScriptManager_api_server.py` 及其 Python 依赖。[任务管理说明](docs/TASK_MANAGEMENT.md) · [远程接入说明](docs/WINDOWS_REMOTE_ACCESS.md)
 
-## Enterprise use cases
+## 企业使用场景
 
-For small operations and development teams maintaining existing Windows business machines: scanners, collectors, build hosts, scheduled data processing and backup scripts. Keep the existing OS and runtime environment, manage tasks locally, and use AI-assisted SSH maintenance when needed.
+适合已有多台 Windows 业务机、维护人员有限的运维和研发团队，例如扫描机、采集机、构建机、定时数据处理和备份任务。保留现有系统与运行环境，本地集中管理每台机器的任务，需要部署、查日志和排错时再让 AI 通过 SSH 接入。
 
-Task management, SSH maintenance and the optional task MCP are separate entry points. This is not a central fleet-management platform or a promise of unattended recovery. Validate permissions, update/recovery behavior and sustained operation in your own environment before production deployment.
+任务管理、SSH 维护与可选任务 MCP 是独立入口。目前不是集中多机运维平台，也不承诺无人值守下所有故障自动恢复。正式使用前，请在本单位环境验证权限、升级恢复和持续运行行为。
 
-## Quick start
+## 快速开始
 
-1. Open [GitHub Releases](https://github.com/shellsec/WindowsBatchScriptManager/releases) and extract the Windows ZIP.
-2. Run `WindowsBatchScriptManager.exe`. The desktop EXE includes its Python runtime.
-3. Select **Add**, choose a script, then select **Start**. Python, Node.js, and other tasks use their configured interpreters.
+1. 打开 [GitHub Releases](https://github.com/shellsec/WindowsBatchScriptManager/releases)，下载并解压 Windows ZIP。
+2. 运行 `WindowsBatchScriptManager.exe`。桌面 EXE 自带 Python 运行库。
+3. 点击「添加」选择脚本，再点击「启动」。Python、Node.js 等任务使用各自配置的解释器。
 
-When upgrading, keep your existing `WindowsBatchScriptManager_scripts.json` and other configuration files.
+升级时请保留原有的 `WindowsBatchScriptManager_scripts.json` 和其他配置文件。
 
-Starting with v1.3.7, use **Check for Updates** beside **Task tools** to check GitHub manually. After confirmation, the Windows single-file EXE downloads and verifies the ZIP, replaces itself, and restarts. The update restart skips tasks configured to launch at startup. Update the standalone API script separately when needed.
+从 v1.3.7 起，可通过顶部「任务增强」右侧的「检查程序更新」手动检查 GitHub 新版。确认后，Windows 单文件版会下载并校验发行包，替换 EXE 后重启。简体和繁体中文界面按顺序尝试 gh-proxy.com、ghfast.top、gh.monlor.com 和 gh.acmsz.top 下载 ZIP，失败时回到 GitHub 直连。校验文件始终从 GitHub 获取。更新重启会跳过「启动本工具时自动启动」的任务。独立 API 脚本可按需单独更新。
 
-## What you can do
+## 核心功能
 
-- Start, stop, and restart tasks in groups. View ports, logs, and execution history.
-- Create tasks from templates, import a folder, or choose a Python virtual environment, Conda environment, or Node.js version.
-- Set schedules, limit concurrent runs, and trigger follow-up tasks based on success or failure.
-- Run HTTP tasks and inspect the status code and response body in the details pane.
-- Enable SSH and SFTP on Windows, copy AI connection details, and sign in with a password or an imported SSH public key.
-- Switch among ten interface languages. The first option follows the system language.
+- 批量启停和重启脚本，查看端口、日志和执行历史。
+- 从模板创建任务、按文件夹批量导入，选择 Python 虚拟环境、Conda 或 Node.js 版本。
+- 设置定时和并发上限，根据执行结果触发后续任务。
+- 执行 HTTP 请求，在下方详情区查看状态码和响应正文。
+- 在 Windows 上启用 SSH/SFTP，复制 AI 接入信息，支持密码登录和导入开发机 SSH 公钥。
+- 切换十种界面语言，菜单第一项为「跟随系统」。
 
-Schedules, queues, and follow-up tasks run while the desktop app is open. [Task management guide](docs/TASK_MANAGEMENT.md)
+定时、队列和后续任务由运行中的桌面程序管理。[任务管理指南](docs/TASK_MANAGEMENT.md)
 
-## C: drive cleanup
-Starting with v1.3.9, **Clean up C: drive** removes recognized `.tmp` / `.temp` files without an age limit, thumbnail caches, supported browser and shader caches, inactive task logs, and crash dumps. Results appear in the lower log pane. Protected application/task paths and running browser caches are skipped; the Recycle Bin is kept.
+## 一键清理 C 盘
+从 v1.3.9 起，「一键清理 C 盘」清理识别出的 `.tmp` / `.temp` 临时文件，不设文件年龄限制，同时清理缩略图、支持的浏览器和着色器缓存、非运行任务日志及崩溃转储。结果显示在下方日志。受保护的程序和任务路径、正在运行的浏览器缓存会跳过，回收站保留。
 
-**Disk cleanup preview** lists recognized cache locations on local fixed drives for the current user, rather than scanning arbitrary folders. Items are unchecked by default. Optional entries include Prefetch, individual system restore points, and disabling hibernation. Review the deletion impact before confirming. Right-click an entry to show its file/folder or copy its path; these actions are unavailable for restore points. Hibernation requires administrator permissions and also disables Fast Startup. If Windows leaves `hiberfil.sys` behind, the app reports the failure without counting the space as reclaimed; it does not forcibly delete the file.
+「磁盘清理预览」列出本地固定磁盘上当前用户的已知缓存位置，不遍历任意目录，默认不勾选。Prefetch、单独的系统还原点和关闭休眠作为可选项目，确认前请查看删除影响。右键可定位文件或目录、复制路径；还原点不支持这些操作。关闭休眠需要管理员权限，也会关闭快速启动。若 Windows 仍保留 `hiberfil.sys`，程序会报错且不计入释放空间，不强制删除该文件。
 
-To disable hibernation manually, right-click the hibernation item in **Disk cleanup preview** and select **Copy commands to disable hibernation**. Search for **Windows PowerShell** in Start, right-click it, select **Run as administrator**, then choose **Yes** at the prompt. In **Administrator: Windows PowerShell**, paste the three lines at the `PS>` prompt and press Enter.
+要手动关闭休眠，在 **磁盘清理预览** 中右键休眠项，选择 **复制关闭休眠命令**。在开始菜单搜索 **Windows PowerShell**，右键选择 **以管理员身份运行**，在权限提示中点 **是**。确认窗口标题为 **管理员：Windows PowerShell**，把三行命令粘贴到 `PS>` 提示符后按回车。
 
 ```powershell
 powercfg.exe /hibernate off
@@ -72,48 +72,48 @@ cmd.exe /d /c 'del /f /q /a "%SystemDrive%\hiberfil.sys"'
 Get-Item -Force -LiteralPath "$env:SystemDrive\hiberfil.sys"
 ```
 
-The first line disables hibernation and Fast Startup. The second tries to forcibly delete any remaining hibernation file. The third checks for the file. A path-not-found message means the file was removed.
+第一行关闭休眠和快速启动，第二行尝试强制删除残留的休眠文件，第三行检查文件。提示「找不到路径」表示该文件已移除。
 
-## AI remote access
+## AI 远程运维
 
-| Target OS | How to connect |
+| 目标系统 | 接入方式 |
 | --- | --- |
-| **Windows** | Open **Remote Access → Enable** in WBSM and approve the administrator prompt. WBSM configures OpenSSH Server and a dedicated standard account. The offline build includes the installer. Select **Copy AI Connection** and share the details with Codex or Claude Code on your development machine. |
-| **Linux / macOS** | Use the SSH/SFTP service already enabled on the target. The default port is **22**. No WBSM installation or platform-specific setup is needed. If the service uses a custom port, connect on that port. |
+| **Windows** | 在 WBSM 中打开 **远程运维 → 启用**，确认管理员授权，一键配置 OpenSSH Server 和专用普通账号。离线版可使用随附安装包。启用后点击 **复制 AI 接入信息**，交给开发机上的 Codex 或 Claude Code。 |
+| **Linux / macOS** | 直接使用目标机已启用的 SSH/SFTP，默认端口为 **22**。无需安装 WBSM 或额外适配。目标机使用自定义端口时，按实际端口连接。 |
 
-![Windows Remote Access window showing OpenSSH running and the Copy AI Connection button, with an example address.](docs/screenshots/remote-access-windows.png)
+![Windows 远程运维窗口，OpenSSH 正在运行，可复制 AI 接入信息。截图使用示例地址。](docs/screenshots/remote-access-windows.png)
 
-- **Deploy an app.** Update a Python script or EXE on your development machine, upload it with SFTP, then start it over SSH and check its health endpoint.
-- **Troubleshoot or edit files.** Inspect processes, download readable logs, update scripts in writable directories, or check whether Python, Git, and Docker are available to the remote account.
-- **Connect again.** Import your development machine's SSH public key on the target to sign in without typing a password. Windows account permissions determine which files and commands the agent can access.
+- **远程部署**：在开发机改好代码后，通过 SFTP 上传 Python 脚本或 EXE，再通过 SSH 在目标机启动并检查健康端点。
+- **排障和修改**：查询进程、下载可读日志、替换可写目录里的脚本，或检查目标机是否能运行 Python、Git 和 Docker。
+- **重复连接**：在目标机导入开发机的 SSH 公钥后，可以免密登录。文件访问和命令执行范围由目标机账号权限决定。
 
-Remote Access uses standard SSH and SFTP clients. The HTTP API and MCP below remain available for listing, starting, and stopping tasks configured in WBSM. [Windows remote access setup and verification](docs/WINDOWS_REMOTE_ACCESS.md)
+远程运维使用标准 SSH/SFTP 命令。下方的 HTTP API 和 MCP 继续用于查询、启动和停止 WBSM 中已配置的任务。 [远程运维配置与验收](docs/WINDOWS_REMOTE_ACCESS.md)
 
-## Remote API and MCP
+## 远程 API 与 MCP
 
-On the server, keep `WindowsBatchScriptManager.exe` and `WindowsBatchScriptManager_api_server.py` in the same directory. The API server needs Python and the packages below. Choose a private API key before making the service reachable from another machine.
+在服务器上把 `WindowsBatchScriptManager.exe` 和 `WindowsBatchScriptManager_api_server.py` 放在同一个目录。API 服务需要服务器上的 Python 和以下依赖。允许其他机器访问前，请设置专用密钥。
 
-After installing the dependencies, select **Start API / MCP** in the **API / MCP** area of the main window. Once running, the status shows the MCP URL and **Copy MCP URL** copies it. If startup fails, check the script location and use **Check Runtime** to diagnose dependencies. You can also start it from PowerShell.
+安装依赖后，可在目标机主界面 **API / MCP** 区域点击 **启动 API / MCP**。运行状态会显示 MCP 地址，可点 **复制 MCP 地址**。找不到脚本或启动失败时，先检查文件位置和 **检测运行环境** 的结果。也可以从 PowerShell 手动启动。
 
 ```powershell
 python -m pip install fastapi "uvicorn[standard]"
-python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-key "<your-key>"
+python WindowsBatchScriptManager_api_server.py --host 0.0.0.0 --port 8765 --api-key "<你的密钥>"
 ```
 
-Use the `X-API-Key` header for HTTP requests. The MCP endpoint is `http://<server>:8765/mcp`. For example, a desktop HTTP task can send `POST /start?id=10` to start task 10 on the server. [API and MCP reference](docs/USER_GUIDE.en-US.md#remote-api-and-mcp)
+HTTP 请求带上 `X-API-Key`。MCP 地址为 `http://<服务器地址>:8765/mcp`。例如，桌面端的 HTTP 任务可发送 `POST /start?id=10` 启动服务器上的任务 10。[API 与 MCP 参考](docs/USER_GUIDE.zh-CN.md#远程-api-与-mcp)
 
-Starting with v1.3.13, WBSM provides read-only `get_task_logs` and `get_task_result` MCP tools. Update both the API script and manager source/EXE before using them. [Task diagnostics and limitations](docs/MCP_TASK_DIAGNOSTICS.md)
+v1.3.13 新增只读 MCP 工具 `get_task_logs`（日志查询）和 `get_task_result`（执行记录查询），使用前需同时更新 API 脚本和主程序源码/EXE。[查询方式与限制](docs/MCP_TASK_DIAGNOSTICS.md)
 
-## Documentation
+## 文档
 
-- [CLI and automation](docs/USER_GUIDE.en-US.md#command-line-cli)
-- [Run from source on Windows, macOS, or Linux](docs/USER_GUIDE.en-US.md#how-to-run)
-- [Build the Windows EXE](PYINSTALLER.md)
-- [Contributing](CONTRIBUTING.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE)
+- [命令行与自动化](docs/USER_GUIDE.zh-CN.md#命令行cli)
+- [Windows、macOS 和 Linux 源码运行](docs/USER_GUIDE.zh-CN.md#运行方式)
+- [Windows 打包说明](PYINSTALLER.md)
+- [贡献指南](CONTRIBUTING.md) · [AGPL-3.0 许可证](LICENSE) · [版权声明](NOTICE)
 
-## Support the project
+## 支持项目
 
-[Sponsor on Afdian](https://ifdian.net/a/shellsec) · [aiv123.com](https://aiv123.com/) · [ofox.ai](https://ofox.io/x/aiv123) · [TOKEN2ROI (AI Top-Ups)](https://token2roi.com/)
+[爱发电](https://ifdian.net/a/shellsec) · [aiv123.com](https://aiv123.com/) · [ofox.ai](https://ofox.io/x/aiv123) · [TOKEN2ROI（AI 代充）](https://token2roi.com/)
 
 
-AGPL-3.0-only applies from v1.3.13. Commercial use is permitted; distribution and modified network deployments have corresponding-source obligations. [License and dependency notices](THIRD_PARTY_NOTICES.md).
+从 v1.3.13 起使用 AGPL-3.0-only。允许商用；再分发和修改版网络部署须履行对应源码提供义务。仅内部修改并不等于必须公开到 GitHub。[许可与依赖说明](THIRD_PARTY_NOTICES.md)。

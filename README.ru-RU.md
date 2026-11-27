@@ -1,10 +1,10 @@
 # WindowsBatchScriptManager · Русский
 
-[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.md) · [English](README.en-US.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
 Управляйте пакетными файлами, сценариями Python, Node.js и PowerShell в Windows. Доступны расписание, очередь выполнения и удалённый API.
 
-Для удалённой работы в Codex или Claude Code включите SSH/SFTP в WBSM на Windows. В Linux и macOS используйте имеющуюся службу SSH, по умолчанию на порту 22. [Настройка и примеры](README.md#ai-remote-access)
+Для удалённой работы в Codex или Claude Code включите SSH/SFTP в WBSM на Windows. В Linux и macOS используйте имеющуюся службу SSH, по умолчанию на порту 22. [Настройка и примеры](README.en-US.md#ai-remote-access)
 
 [Скачать для Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 

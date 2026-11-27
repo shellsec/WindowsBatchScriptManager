@@ -1,10 +1,10 @@
 # WindowsBatchScriptManager · 한국어
 
-[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.md) · [English](README.en-US.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
 Windows 배치, Python, Node.js, PowerShell 작업을 관리합니다. 일정, 실행 대기열, 원격 API를 지원합니다.
 
-Codex 또는 Claude Code에서 원격으로 작업하려면 Windows에서는 WBSM으로 SSH/SFTP를 활성화합니다. Linux와 macOS에서는 기존 SSH 서비스(기본 포트 22)를 사용합니다. [설정과 사용 예](README.md#ai-remote-access)
+Codex 또는 Claude Code에서 원격으로 작업하려면 Windows에서는 WBSM으로 SSH/SFTP를 활성화합니다. Linux와 macOS에서는 기존 SSH 서비스(기본 포트 22)를 사용합니다. [설정과 사용 예](README.en-US.md#ai-remote-access)
 
 [Windows용 다운로드](https://github.com/shellsec/WindowsBatchScriptManager/releases)
 
