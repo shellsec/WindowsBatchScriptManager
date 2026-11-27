@@ -503,7 +503,7 @@ TRANSLATIONS = {
     "status_schedule_triggered_power": "Geplante Aktion ausgeführt: %s → %s",
     "status_power_action_failed": "Systemaktion fehlgeschlagen: %s",
     "label_api_ops": "API:",
-    "btn_start_api": "API starten",
+    "btn_start_api": "API / MCP starten",
     "btn_stop_api": "API anhalten",
     "btn_restart_api": "API neu starten",
     "status_api_running": "Läuft mit PID=%s",

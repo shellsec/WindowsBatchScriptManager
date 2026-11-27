@@ -503,7 +503,7 @@ TRANSLATIONS = {
     'status_schedule_triggered_power': '排程工作觸發: %s → %s',
     'status_power_action_failed': '系統操作失敗: %s',
     'label_api_ops': 'API:',
-    'btn_start_api': '啟動API',
+    'btn_start_api': '啟動 API / MCP',
     'btn_stop_api': '停止API',
     'btn_restart_api': '重新啟動API',
     'status_api_running': '執行中 PID=%s',

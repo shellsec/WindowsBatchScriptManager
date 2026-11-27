@@ -328,7 +328,7 @@ TRANSLATIONS = {
     "btn_tail_log": "Registro en directo",
     "dialog_tail_log": "Registro en directo - %s",
     "btn_restart_self": "Reiniciar aplicación",
-    "btn_start_api": "Iniciar API",
+    "btn_start_api": "Iniciar API / MCP",
     "btn_stop_api": "Detener API",
     "btn_restart_api": "Reiniciar API",
     "status_api_running": "En ejecución PID=%s",

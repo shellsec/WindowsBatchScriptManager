@@ -1,11 +1,11 @@
-WindowsBatchScriptManager v1.3.13
+WindowsBatchScriptManager v1.3.14
 License: AGPL-3.0-only
 
 Corresponding source (including build instructions and tests):
-https://github.com/shellsec/WindowsBatchScriptManager/releases/download/v1.3.13/WindowsBatchScriptManager-1.3.13-source.zip
+https://github.com/shellsec/WindowsBatchScriptManager/releases/download/v1.3.14/WindowsBatchScriptManager-1.3.14-source.zip
 
 Release:
-https://github.com/shellsec/WindowsBatchScriptManager/releases/tag/v1.3.13
+https://github.com/shellsec/WindowsBatchScriptManager/releases/tag/v1.3.14
 
 See LICENSE, NOTICE and THIRD_PARTY_NOTICES.md. Third-party components retain
 their original licenses. Modified network deployments must offer their actual

@@ -328,7 +328,7 @@ TRANSLATIONS = {
     "btn_tail_log": "실시간 로그",
     "dialog_tail_log": "실시간 로그 - %s",
     "btn_restart_self": "프로그램 다시 시작",
-    "btn_start_api": "API 시작",
+    "btn_start_api": "API / MCP 시작",
     "btn_stop_api": "API 중지",
     "btn_restart_api": "API 다시 시작",
     "status_api_running": "실행 중 PID=%s",

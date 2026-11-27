@@ -21,7 +21,7 @@ import tkinter as tk
 import calendar
 from datetime import datetime, timedelta
 from pathlib import Path
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, font as tkfont
 from typing import Optional
 from urllib.request import HTTPRedirectHandler, build_opener, urlopen, Request
 from urllib.error import URLError, HTTPError
@@ -861,8 +861,8 @@ LANGUAGES = {
         "status_schedule_triggered_power": "定时任务触发: %s → %s",
         "status_power_action_failed": "系统操作失败: %s",
         # ---- API 服务（独立管理） ----
-        "label_api_ops": "API:",
-        "btn_start_api": "启动API",
+        "label_api_ops": "API / MCP:",
+        "btn_start_api": "启动 API / MCP",
         "btn_stop_api": "停止API",
         "btn_restart_api": "重启API",
         "status_api_running": "运行中 PID=%s",
@@ -1419,8 +1419,8 @@ LANGUAGES = {
         "status_schedule_triggered_power": "Schedule triggered: %s → %s",
         "status_power_action_failed": "System action failed: %s",
         # ---- API Server (standalone) ----
-        "label_api_ops": "API:",
-        "btn_start_api": "Start API",
+        "label_api_ops": "API / MCP:",
+        "btn_start_api": "Start API / MCP",
         "btn_stop_api": "Stop API",
         "btn_restart_api": "Restart API",
         "status_api_running": "Running PID=%s",
@@ -5953,10 +5953,20 @@ class BatchManagerApp(TaskFeatureMixin):
         row_api.pack(fill=tk.X, pady=(0, 3))
         self.label_api_ops = ttk.Label(row_api, text=self._lang["label_api_ops"])
         self.label_api_ops.pack(side=tk.LEFT, padx=(0, 4))
-        self.btn_start_api = ttk.Button(row_api, text=self._lang["btn_start_api"], command=self._on_start_api)
-        self.btn_start_api.pack(side=tk.LEFT, padx=2)
+        self._api_start_font = tkfont.nametofont("TkDefaultFont", root=self.root).copy()
+        self._api_start_font.configure(weight="bold")
+        ttk.Style(self.root).configure("ApiStart.TButton", font=self._api_start_font, padding=(8, 3))
+        self.btn_start_api = ttk.Button(
+            row_api, text=self._lang["btn_start_api"], command=self._on_start_api, style="ApiStart.TButton",
+        )
+        self.btn_start_api.pack(side=tk.LEFT, padx=(2, 6))
         self.btn_stop_api = ttk.Button(row_api, text=self._lang["btn_stop_api"], command=self._on_stop_api)
         self.btn_stop_api.pack(side=tk.LEFT, padx=2)
+        self.btn_copy_mcp_url = ttk.Button(
+            row_api, text=self._task_text("复制 MCP 地址", "Copy MCP URL"),
+            command=self._copy_mcp_url, state=tk.DISABLED,
+        )
+        self.btn_copy_mcp_url.pack(side=tk.LEFT, padx=2)
         self.btn_restart_api = ttk.Button(row_api, text=self._lang["btn_restart_api"], command=self._on_restart_api)
         self.btn_restart_api.pack(side=tk.LEFT, padx=2)
         self.btn_load_api_calls = ttk.Button(row_api, text=self._lang["btn_load_api_calls"], command=self._on_load_api_call_tasks)
@@ -6360,6 +6370,12 @@ class BatchManagerApp(TaskFeatureMixin):
         docs = cfg.get("docs_url") or ((cfg.get("base_url") or "") + "/")
         self.status_var.set(self._lang["status_api_call_hint"] % docs)
 
+    def _mcp_url(self):
+        return build_api_call_config(self._current_lan_ip())["base_url"] + "/mcp"
+
+    def _copy_mcp_url(self):
+        self._copy_to_clipboard(self._mcp_url())
+
     def _load_notification_config(self):
         """加载通知配置。"""
         saved_config = load_notification_config()
@@ -6467,6 +6483,8 @@ class BatchManagerApp(TaskFeatureMixin):
             self.label_api_ops.config(text=self._lang["label_api_ops"])
         if getattr(self, "btn_start_api", None):
             self.btn_start_api.config(text=self._lang["btn_start_api"])
+        if getattr(self, "btn_copy_mcp_url", None):
+            self.btn_copy_mcp_url.config(text=self._task_text("复制 MCP 地址", "Copy MCP URL"))
         if getattr(self, "btn_stop_api", None):
             self.btn_stop_api.config(text=self._lang["btn_stop_api"])
         if getattr(self, "btn_restart_api", None):
@@ -7611,6 +7629,8 @@ class BatchManagerApp(TaskFeatureMixin):
             state = tk.NORMAL if api_ok else tk.DISABLED
             self.btn_restart_api.config(state=state)
         if not api_ok:
+            if getattr(self, "btn_copy_mcp_url", None):
+                self.btn_copy_mcp_url.config(state=tk.DISABLED)
             self.label_api_status.config(text=self._lang["status_api_missing"], foreground="orange")
             self._wrap_toolbar_row(self.label_api_status.master)
             return
@@ -7621,9 +7641,13 @@ class BatchManagerApp(TaskFeatureMixin):
             except Exception:
                 self._api_server_popen = None
         pids = self._get_api_server_pids_for_ui(force_scan=force_scan)
+        if getattr(self, "btn_copy_mcp_url", None):
+            self.btn_copy_mcp_url.config(state=tk.NORMAL if pids else tk.DISABLED)
         if pids:
             pid_s = str(pids[0]) if len(pids) == 1 else ",".join(str(x) for x in pids)
-            self.label_api_status.config(text=self._lang["status_api_running"] % pid_s, foreground="green")
+            self.label_api_status.config(
+                text=f'{self._lang["status_api_running"] % pid_s} · {self._mcp_url()}', foreground="green",
+            )
         else:
             self.label_api_status.config(text=self._lang["status_api_stopped"], foreground="gray")
         self._wrap_toolbar_row(self.label_api_status.master)
@@ -7723,6 +7747,8 @@ class BatchManagerApp(TaskFeatureMixin):
         if not p or not p.pid:
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_start_failed"])
             self._update_api_status_label(force_scan=True)
+            self.label_api_status.config(text=self._lang["msg_api_start_failed"], foreground="red")
+            self._wrap_toolbar_row(self.label_api_status.master)
             return
         self._api_server_popen = p
         call = self._persist_api_call_config()

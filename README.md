@@ -7,7 +7,7 @@ Manage batch, Python, Node.js, and PowerShell tasks from a Windows desktop app. 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
 [Download for Windows](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [User guide](docs/USER_GUIDE.en-US.md) · [AI remote access](#ai-remote-access) · [API and MCP](docs/USER_GUIDE.en-US.md#remote-api-and-mcp)
 
@@ -92,6 +92,8 @@ Remote Access uses standard SSH and SFTP clients. The HTTP API and MCP below rem
 ## Remote API and MCP
 
 On the server, keep `WindowsBatchScriptManager.exe` and `WindowsBatchScriptManager_api_server.py` in the same directory. The API server needs Python and the packages below. Choose a private API key before making the service reachable from another machine.
+
+After installing the dependencies, select **Start API / MCP** in the **API / MCP** area of the main window. Once running, the status shows the MCP URL and **Copy MCP URL** copies it. If startup fails, check the script location and use **Check Runtime** to diagnose dependencies. You can also start it from PowerShell.
 
 ```powershell
 python -m pip install fastapi "uvicorn[standard]"

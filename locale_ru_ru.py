@@ -328,7 +328,7 @@ TRANSLATIONS = {
     "btn_tail_log": "Журнал в реальном времени",
     "dialog_tail_log": "Журнал в реальном времени — %s",
     "btn_restart_self": "Перезапустить приложение",
-    "btn_start_api": "Запустить API",
+    "btn_start_api": "Запустить API / MCP",
     "btn_stop_api": "Остановить API",
     "btn_restart_api": "Перезапустить API",
     "status_api_running": "Работает, PID=%s",

@@ -503,7 +503,7 @@ TRANSLATIONS = {
     "status_schedule_triggered_power": "スケジュールを実行しました：%s → %s",
     "status_power_action_failed": "システム操作に失敗しました：%s",
     "label_api_ops": "API：",
-    "btn_start_api": "API を開始",
+    "btn_start_api": "API / MCP を開始",
     "btn_stop_api": "API を停止",
     "btn_restart_api": "API を再起動",
     "status_api_running": "実行中 PID=%s",

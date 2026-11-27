@@ -7,7 +7,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/shellsec/WindowsBatchScriptManager)](https://github.com/shellsec/WindowsBatchScriptManager/releases/latest)
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
+[简体中文](README.zh-CN.md) · [English](README.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja-JP.md) · [한국어](README.ko-KR.md) · [Deutsch](README.de-DE.md) · [Français](README.fr-FR.md) · [Español](README.es-ES.md) · [Português (Brasil)](README.pt-BR.md) · [Русский](README.ru-RU.md)
 
 [下载 Windows 版](https://github.com/shellsec/WindowsBatchScriptManager/releases) · [使用手册](docs/USER_GUIDE.zh-CN.md) · [AI 远程运维](#ai-远程运维) · [API 与 MCP](docs/USER_GUIDE.zh-CN.md#远程-api-与-mcp)
 
@@ -92,6 +92,8 @@ Get-Item -Force -LiteralPath "$env:SystemDrive\hiberfil.sys"
 ## 远程 API 与 MCP
 
 在服务器上把 `WindowsBatchScriptManager.exe` 和 `WindowsBatchScriptManager_api_server.py` 放在同一个目录。API 服务需要服务器上的 Python 和以下依赖。允许其他机器访问前，请设置专用密钥。
+
+安装依赖后，可在目标机主界面 **API / MCP** 区域点击 **启动 API / MCP**。运行状态会显示 MCP 地址，可点 **复制 MCP 地址**。找不到脚本或启动失败时，先检查文件位置和 **检测运行环境** 的结果。也可以从 PowerShell 手动启动。
 
 ```powershell
 python -m pip install fastapi "uvicorn[standard]"
