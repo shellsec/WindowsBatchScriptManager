@@ -97,6 +97,8 @@ Remote Access uses standard SSH and SFTP clients. The HTTP API and MCP below rem
 
 Run `WindowsBatchScriptManager.exe` on the server and click **Start API / MCP**. WBSM extracts its bundled `WindowsBatchScriptManager_api_server.py` beside the EXE on first use. The API server needs Python and the packages below. Choose a private API key before making the service reachable from another machine.
 
+Use **Settings → Restore bundled MCP/API script** to back up the existing script and restore the bundled copy. API/MCP uses the restored script the next time it starts.
+
 After installing the dependencies, select **Start API / MCP** in the **API / MCP** area of the main window. Once running, the status shows the MCP URL and **Copy MCP URL** copies it. If startup fails, check the script location and use **Check Runtime** to diagnose dependencies. You can also start it from PowerShell.
 
 ```powershell

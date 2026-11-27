@@ -97,6 +97,8 @@ Get-Item -Force -LiteralPath "$env:SystemDrive\hiberfil.sys"
 
 在服务器上运行 `WindowsBatchScriptManager.exe`，点击「启动 API / MCP」时会自动把内置的 `WindowsBatchScriptManager_api_server.py` 释放到 EXE 所在目录。API 服务需要服务器上的 Python 和以下依赖。允许其他机器访问前，请设置专用密钥。
 
+在「设置 → 恢复内置 MCP/API 脚本」可以先备份现有脚本，再恢复内置版本。下次启动 API/MCP 时使用恢复后的脚本。
+
 安装依赖后，可在目标机主界面 **API / MCP** 区域点击 **启动 API / MCP**。运行状态会显示 MCP 地址，可点 **复制 MCP 地址**。找不到脚本或启动失败时，先检查文件位置和 **检测运行环境** 的结果。也可以从 PowerShell 手动启动。
 
 ```powershell

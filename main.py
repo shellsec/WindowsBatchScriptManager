@@ -8,6 +8,7 @@ Windows Batch Script Manager - Windows 批处理脚本管理器
 
 import json
 import os
+import tempfile
 import queue
 import re
 import socket
@@ -2563,8 +2564,6 @@ def ensure_api_server_script_path() -> Optional[str]:
     if existing or not bundle:
         return existing
 
-    import tempfile
-
     target = Path(get_app_path()).resolve().parent / API_SERVER_SCRIPT_NAME
     temporary = None
     try:
@@ -2590,6 +2589,29 @@ def ensure_api_server_script_path() -> Optional[str]:
             except OSError:
                 pass
     return get_api_server_script_path()
+
+
+def restore_bundled_api_server_script(bundle: Path, target: Path) -> Optional[Path]:
+    """Back up the current script, then atomically replace it with the bundled copy."""
+    content = (bundle / API_SERVER_SCRIPT_NAME).read_bytes()
+    temporary = None
+    backup = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+        if target.exists():
+            old_content = target.read_bytes()
+            with tempfile.NamedTemporaryFile(
+                dir=target.parent, prefix=target.name + ".", suffix=".bak", delete=False,
+            ) as stream:
+                stream.write(old_content)
+                backup = Path(stream.name)
+        temporary.replace(target)
+        return backup
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def find_api_server_pids(owned_popen=None) -> list:
@@ -5997,6 +6019,12 @@ class BatchManagerApp(TaskFeatureMixin):
         self._settings_menu.add_separator()
         self._settings_menu.add_command(label=self._lang.get("menu_restore_bak", "从上次备份恢复配置"), command=self._on_restore_config_bak)
         self._settings_menu.add_command(label=self._lang.get("menu_global_hotkeys", "快捷键说明"), command=self._on_show_hotkeys)
+        if getattr(sys, "_MEIPASS", None):
+            self._settings_menu.add_command(
+                label=self._task_text("恢复内置 MCP/API 脚本", "Restore bundled MCP/API script"),
+                command=self._on_restore_bundled_api_script,
+            )
+            self._restore_api_script_menu_index = self._settings_menu.index("end")
         
         # 开机/登录自启：Windows 注册表；Mac launchd；Linux systemd user
         self._startup_var = tk.BooleanVar(value=_is_startup_enabled())
@@ -6716,6 +6744,11 @@ class BatchManagerApp(TaskFeatureMixin):
                         menubar.entryconfig(i, label=self._lang.get("menu_settings", "设置"))
                         if getattr(self, "_settings_menu", None):
                             self._settings_menu.entryconfig(0, label=self._lang.get("menu_refresh_interval", "刷新间隔"))
+                            if hasattr(self, "_restore_api_script_menu_index"):
+                                self._settings_menu.entryconfig(
+                                    self._restore_api_script_menu_index,
+                                    label=self._task_text("恢复内置 MCP/API 脚本", "Restore bundled MCP/API script"),
+                                )
                             if getattr(self, "_start_minimized_menu_index", None) is not None:
                                 self._settings_menu.entryconfig(
                                     self._start_minimized_menu_index,
@@ -7876,6 +7909,28 @@ class BatchManagerApp(TaskFeatureMixin):
 
         threading.Thread(target=check, daemon=True).start()
         self.root.after(100, show_result)
+
+    def _on_restore_bundled_api_script(self):
+        title = self._task_text("恢复内置 MCP/API 脚本", "Restore bundled MCP/API script")
+        bundle = getattr(sys, "_MEIPASS", None)
+        if not bundle:
+            return
+        target = Path(get_app_path()).resolve().parent / API_SERVER_SCRIPT_NAME
+        confirm = self._task_text(
+            "恢复内置脚本？现有脚本会先备份。下次启动 API/MCP 时使用恢复后的脚本。",
+            "Restore the bundled script? The current script will be backed up. The restored script will be used the next time API/MCP starts.",
+        )
+        if not messagebox.askyesno(title, confirm, parent=self.root, default=messagebox.NO):
+            return
+        try:
+            backup = restore_bundled_api_server_script(Path(bundle), target)
+        except OSError as exc:
+            messagebox.showerror(title, str(exc), parent=self.root)
+            return
+        message = self._task_text("已恢复内置脚本。", "Bundled script restored.")
+        if backup is not None:
+            message += "\n" + self._task_text("备份文件", "Backup file") + "\n" + str(backup)
+        messagebox.showinfo(title, message, parent=self.root)
 
     def _on_start_api(self):
         path = ensure_api_server_script_path()
