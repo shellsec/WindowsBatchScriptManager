@@ -51,6 +51,9 @@ Starting with v1.3.7, use **Check for Updates** beside **Task tools** to check G
 ## What you can do
 
 - Start, stop, and restart tasks in groups. View ports, logs, and execution history.
+- When multiple WBSM installations run side by side, API controls match the service process to the current installation.
+- API status checks also cache empty results. OpenSSH status is read directly from the Windows service manager.
+- Select a run in execution history and choose **Copy AI diagnostics** to copy its status, exit code, and linked log tail. Common credential patterns are masked. Review the output before sharing.
 - Create tasks from templates, import a folder, or choose a Python virtual environment, Conda environment, or Node.js version.
 - Set schedules, limit concurrent runs, and trigger follow-up tasks based on success or failure.
 - Run HTTP tasks and inspect the status code and response body in the details pane.

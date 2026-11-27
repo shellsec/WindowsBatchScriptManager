@@ -1,6 +1,8 @@
 """Windows OpenSSH enrollment UI."""
 
 import base64
+import ctypes
+from ctypes import wintypes
 import json
 import os
 from pathlib import Path
@@ -22,18 +24,34 @@ def _powershell_path():
 
 
 def _service_status():
-    command = (
-        "$service = Get-Service -Name sshd -ErrorAction SilentlyContinue; "
-        "if ($service) { $service.Status.ToString() } else { 'Missing' }"
-    )
-    try:
-        result = subprocess.run(
-            [str(_powershell_path()), "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=8,
-        )
-        return result.stdout.decode("ascii", errors="replace").strip() if result.returncode == 0 else "Unknown"
-    except (OSError, subprocess.TimeoutExpired):
+    api = ctypes.WinDLL("advapi32", use_last_error=True)
+    api.OpenSCManagerW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+    api.OpenSCManagerW.restype = wintypes.HANDLE
+    api.OpenServiceW.argtypes = (wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD)
+    api.OpenServiceW.restype = wintypes.HANDLE
+    api.CloseServiceHandle.argtypes = (wintypes.HANDLE,)
+    api.CloseServiceHandle.restype = wintypes.BOOL
+    api.QueryServiceStatus.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    api.QueryServiceStatus.restype = wintypes.BOOL
+    manager = api.OpenSCManagerW(None, None, 0x0001)  # SC_MANAGER_CONNECT
+    if not manager:
         return "Unknown"
+    try:
+        service = api.OpenServiceW(manager, "sshd", 0x0004)  # SERVICE_QUERY_STATUS
+        if not service:
+            return "Missing" if ctypes.get_last_error() == 1060 else "Unknown"
+        try:
+            status = (wintypes.DWORD * 7)()  # SERVICE_STATUS
+            if not api.QueryServiceStatus(service, status):
+                return "Unknown"
+            return {
+                1: "Stopped", 2: "StartPending", 3: "StopPending", 4: "Running",
+                5: "ContinuePending", 6: "PausePending", 7: "Paused",
+            }.get(status[1], "Unknown")
+        finally:
+            api.CloseServiceHandle(service)
+    finally:
+        api.CloseServiceHandle(manager)
 
 
 def _configure(request):
