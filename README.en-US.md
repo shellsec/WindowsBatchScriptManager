@@ -53,6 +53,7 @@ Starting with v1.3.7, use **Check for Updates** beside **Task tools** to check G
 - Start, stop, and restart tasks in groups. View ports, logs, and execution history.
 - When multiple WBSM installations run side by side, API controls match the service process to the current installation.
 - API status checks also cache empty results. OpenSSH status is read directly from the Windows service manager.
+- In Edit Script → Basic, enable **Restart when app starts** to restart an owned local task when WBSM opens or start it if stopped.
 - Select a run in execution history and choose **Copy AI diagnostics** to copy its status, exit code, and linked log tail. Common credential patterns are masked. Review the output before sharing.
 - Create tasks from templates, import a folder, or choose a Python virtual environment, Conda environment, or Node.js version.
 - Set schedules, limit concurrent runs, and trigger follow-up tasks based on success or failure.
@@ -94,7 +95,7 @@ Remote Access uses standard SSH and SFTP clients. The HTTP API and MCP below rem
 
 ## Remote API and MCP
 
-On the server, keep `WindowsBatchScriptManager.exe` and `WindowsBatchScriptManager_api_server.py` in the same directory. The API server needs Python and the packages below. Choose a private API key before making the service reachable from another machine.
+Run `WindowsBatchScriptManager.exe` on the server and click **Start API / MCP**. WBSM extracts its bundled `WindowsBatchScriptManager_api_server.py` beside the EXE on first use. The API server needs Python and the packages below. Choose a private API key before making the service reachable from another machine.
 
 After installing the dependencies, select **Start API / MCP** in the **API / MCP** area of the main window. Once running, the status shows the MCP URL and **Copy MCP URL** copies it. If startup fails, check the script location and use **Check Runtime** to diagnose dependencies. You can also start it from PowerShell.
 

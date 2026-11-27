@@ -71,3 +71,6 @@ $RECYCLE.BIN/
 
 # Local planning notes
 /docs/superpowers/
+
+*.startup-tasks.json
+*.startup-tasks.json.tmp

@@ -797,6 +797,7 @@ LANGUAGES = {
         "status_mark_running_done": "已为 %d 个运行中任务勾选启动时自动启动（新勾选 %d）",
         "status_mark_running_cleared": "，已取消未运行 %d 项",
         "check_launch_on_app_start": "启动本工具时自动启动",
+        "check_restart_on_app_start": "启动本工具时自动重启",
         "status_refresh_paused": "已暂停定时刷新；保活、运行中接管会停止，可点「刷新状态」或「恢复刷新」",
         "status_history_cleared": "已清除历史记录",
         "status_notification_saved": "通知配置已保存",
@@ -1171,6 +1172,7 @@ LANGUAGES = {
         "check_log_output": "Log output to logs/ on start (for troubleshooting)",
         "check_auto_restart": "Auto restart on crash (Keep Alive)",
         "check_launch_on_app_start": "Launch when app starts",
+        "check_restart_on_app_start": "Restart when app starts",
         "check_schedule_enabled": "Enable Schedule",
         "schedule_action_start": "Start",
         "schedule_action_restart": "Restart Task",
@@ -1660,6 +1662,7 @@ def config_item_to_save(it: dict) -> dict:
         "python_exe": interpreter if stype == "python" else "",
         "auto_restart": it.get("auto_restart", False),
         "launch_on_app_start": it.get("launch_on_app_start", False),
+        "restart_on_app_start": it.get("restart_on_app_start", False),
         "log_output": it.get("log_output", False),
         "schedule_enabled": it.get("schedule_enabled", False),
         "schedule_action": it.get("schedule_action", "start"),
@@ -2508,7 +2511,7 @@ def apply_mark_running_as_launch_on_start(
             continue
         if it.get("id") in running_id_set:
             n_running += 1
-            if not it.get("launch_on_app_start"):
+            if not it.get("launch_on_app_start") and not it.get("restart_on_app_start"):
                 it["launch_on_app_start"] = True
                 n_enabled += 1
         elif clear_stopped and it.get("launch_on_app_start"):
@@ -2551,6 +2554,42 @@ def get_api_server_script_path() -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def ensure_api_server_script_path() -> Optional[str]:
+    """Release the bundled API script beside the EXE when first needed."""
+    existing = get_api_server_script_path()
+    bundle = getattr(sys, "_MEIPASS", None)
+    if existing or not bundle:
+        return existing
+
+    import tempfile
+
+    target = Path(get_app_path()).resolve().parent / API_SERVER_SCRIPT_NAME
+    temporary = None
+    try:
+        content = (Path(bundle) / API_SERVER_SCRIPT_NAME).read_bytes()
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+        # Publish complete contents without overwriting a user-supplied script.
+        if os.name == "nt":
+            temporary.rename(target)
+        else:
+            os.link(temporary, target)
+    except FileExistsError:
+        pass
+    except OSError:
+        import logging
+
+        logging.exception("Unable to release the API server script")
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+    return get_api_server_script_path()
 
 
 def find_api_server_pids(owned_popen=None) -> list:
@@ -2651,7 +2690,7 @@ def read_api_server_launch_settings(script_path: Optional[str] = None) -> dict:
     port = _API_DEFAULT_PORT
     file_default_key = "change-me-in-production"
     disable_auth = False
-    path = script_path or get_api_server_script_path()
+    path = script_path or ensure_api_server_script_path()
     text = ""
     if path and os.path.isfile(path):
         try:
@@ -3516,7 +3555,10 @@ class AddEditDialog(tk.Toplevel):
         self.var_group = tk.StringVar(value=initial.get("group", ""))
         self.var_interpreter = tk.StringVar(value=initial.get("interpreter", "") or initial.get("python_exe", ""))
         self.var_auto = tk.BooleanVar(value=bool(initial.get("auto_restart", False)))
-        self.var_launch_on_app_start = tk.BooleanVar(value=bool(initial.get("launch_on_app_start", False)))
+        self.var_restart_on_app_start = tk.BooleanVar(value=bool(initial.get("restart_on_app_start", False)))
+        self.var_launch_on_app_start = tk.BooleanVar(
+            value=bool(initial.get("launch_on_app_start", False)) and not self.var_restart_on_app_start.get()
+        )
         self.var_schedule_enabled = tk.BooleanVar(value=bool(initial.get("schedule_enabled", False)))
         self.var_depends_on = tk.StringVar(value=initial.get("depends_on", ""))
         self.var_delay_after_dep = tk.StringVar(value=str(initial.get("delay_after_dep", 0)))
@@ -3779,7 +3821,16 @@ class AddEditDialog(tk.Toplevel):
             self._check_auto_restart.config(state=tk.DISABLED)
             self.var_auto.set(False)
         row += 1
-        ttk.Checkbutton(tab_basic, text=self._lang["check_launch_on_app_start"], variable=self.var_launch_on_app_start).grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Checkbutton(
+            tab_basic, text=self._lang["check_launch_on_app_start"], variable=self.var_launch_on_app_start,
+            command=lambda: self.var_restart_on_app_start.set(False) if self.var_launch_on_app_start.get() else None,
+        ).grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
+        row += 1
+        self._check_restart_on_app_start = ttk.Checkbutton(
+            tab_basic, text=self._lang["check_restart_on_app_start"], variable=self.var_restart_on_app_start,
+            command=lambda: self.var_launch_on_app_start.set(False) if self.var_restart_on_app_start.get() else None,
+        )
+        self._check_restart_on_app_start.grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
         row += 1
         # 启动参数
         ttk.Label(tab_basic, text=self._lang["label_args"]).grid(row=row, column=0, sticky=tk.W, padx=6, pady=4)
@@ -4072,6 +4123,8 @@ class AddEditDialog(tk.Toplevel):
                     widget.config(text=self._lang["check_auto_restart"])
                 elif "启动本工具时自动启动" in text or "Launch when app starts" in text:
                     widget.config(text=self._lang["check_launch_on_app_start"])
+                elif text in ("启动本工具时自动重启", "Restart when app starts"):
+                    widget.config(text=self._lang["check_restart_on_app_start"])
                 elif "启用定时任务" in text or "Enable Schedule" in text:
                     widget.config(text=self._lang["check_schedule_enabled"])
                 elif "启用 Webhook 通知" in text or "Enable Webhook Notification" in text:
@@ -4364,6 +4417,11 @@ class AddEditDialog(tk.Toplevel):
     def _on_task_type_changed(self, event=None):
         """类型下拉框切换时，更新标签、提示和浏览按钮可见性。"""
         type_key = self._type_reverse_map.get(self.var_task_type.get(), "script")
+        if hasattr(self, "_check_restart_on_app_start"):
+            supports_restart = type_key == "script"
+            self._check_restart_on_app_start.configure(state=tk.NORMAL if supports_restart else tk.DISABLED)
+            if not supports_restart:
+                self.var_restart_on_app_start.set(False)
         if type_key != "http_get" and hasattr(self, "_http_opts_frame"):
             self._http_opts_frame.grid_remove()
         if type_key == "http_get":
@@ -4670,6 +4728,7 @@ class AddEditDialog(tk.Toplevel):
             "python_exe": interpreter if is_py else "",
             "auto_restart": self.var_auto.get() if not is_system_power else False,
             "launch_on_app_start": self.var_launch_on_app_start.get() if not is_system_power else False,
+            "restart_on_app_start": self.var_restart_on_app_start.get() and not is_system_power and stype not in ("http_get", "process", "command"),
             "log_output": self.var_log.get() if stype in ("python", "node", "powershell", "command") else False,
             "schedule_enabled": self.var_schedule_enabled.get(),
             "schedule_action": {
@@ -5441,6 +5500,7 @@ class BatchEditDialog(tk.Toplevel):
             # 修改「启动本工具时自动启动」
             launch_on_action = self.var_launch_on_app_start_action.get()
             if launch_on_action == "enable":
+                it["restart_on_app_start"] = False
                 it["launch_on_app_start"] = True
                 changed = True
             elif launch_on_action == "disable":
@@ -6893,6 +6953,7 @@ class BatchManagerApp(TaskFeatureMixin):
                 "python_exe": interpreter if stype == "python" else "",
                 "auto_restart": _bool_from_config(r.get("auto_restart", False)),
                 "launch_on_app_start": _bool_from_config(r.get("launch_on_app_start", False)),
+                "restart_on_app_start": _bool_from_config(r.get("restart_on_app_start", False)),
                 "log_output": _bool_from_config(r.get("log_output", False)),
                 "schedule_enabled": _bool_from_config(r.get("schedule_enabled", False)),
                 "schedule_action": r.get("schedule_action", "start"),
@@ -7751,7 +7812,7 @@ class BatchManagerApp(TaskFeatureMixin):
             self._persist_api_call_config()
             self._update_api_status_label()
             return
-        path = get_api_server_script_path()
+        path = ensure_api_server_script_path()
         if not path or not os.path.isfile(path):
             self.status_var.set(self._lang["status_api_missing"])
             return
@@ -7817,7 +7878,7 @@ class BatchManagerApp(TaskFeatureMixin):
         self.root.after(100, show_result)
 
     def _on_start_api(self):
-        path = get_api_server_script_path()
+        path = ensure_api_server_script_path()
         if not path or not os.path.isfile(path):
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_not_found"] % (path or API_SERVER_SCRIPT_NAME))
             return
@@ -7857,7 +7918,7 @@ class BatchManagerApp(TaskFeatureMixin):
         self._update_api_status_label(force_scan=True)
 
     def _on_restart_api(self):
-        path = get_api_server_script_path()
+        path = ensure_api_server_script_path()
         if not path or not os.path.isfile(path):
             messagebox.showerror(self._lang["msg_error"], self._lang["msg_api_not_found"] % (path or API_SERVER_SCRIPT_NAME))
             return
@@ -8847,9 +8908,56 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _do_launch_on_start_items(self):
         for it in self.items:
-            if it.get("launch_on_app_start"):
+            if it.get("launch_on_app_start") and not it.get("restart_on_app_start"):
                 self._start_single_script(it, trigger="startup")
         self._sync_tree()
+
+    def _restart_on_start_items(self):
+        if self._adopt_scanning:
+            self.root.after(100, self._restart_on_start_items)
+            return
+        for item in self.items:
+            if not item.get("restart_on_app_start") or is_system_power_task(item):
+                continue
+            if item.get("script_type") in ("process", "command") or _is_http_task_item(item):
+                continue
+            process = item.get("_startup_owned_process")
+            if process is None:
+                key = os.path.normcase(resolve_script_file_path(item))
+                if key in self._adopt_cache or item.get("pid"):
+                    self._report_startup_restart_failure(item)
+                    continue
+            else:
+                try:
+                    children = process.children(recursive=True)
+                    for owned in [*reversed(children), process]:
+                        try:
+                            owned.terminate()
+                        except psutil.NoSuchProcess:
+                            pass
+                    _, alive = psutil.wait_procs([process, *children], timeout=3)
+                    if alive:
+                        self._report_startup_restart_failure(item)
+                        continue
+                except psutil.NoSuchProcess:
+                    pass
+                except psutil.Error:
+                    self._report_startup_restart_failure(item)
+                    continue
+                for field in ("pid", "pid_set_at", "_popen", "_startup_owned_process"):
+                    item.pop(field, None)
+            self._start_single_script(item, trigger="startup")
+        self._sync_tree()
+
+    def _report_startup_restart_failure(self, item):
+        import logging
+
+        message = self._task_text(
+            "启动时未能安全重启任务：%s",
+            "Could not safely restart task at startup: %s",
+        ) % item.get("name", "")
+        logging.warning(message)
+        self.status_var.set(message)
 
     def _apply_launch_on_start_results(self, results):
         """在主线程中应用「启动时自动启动」的结果并刷新界面。"""
@@ -8934,6 +9042,7 @@ class BatchManagerApp(TaskFeatureMixin):
             "log_output": r.get("log_output", False),
             "schedule_enabled": r.get("schedule_enabled", False),
             "launch_on_app_start": r.get("launch_on_app_start", False),
+            "restart_on_app_start": r.get("restart_on_app_start", False),
             "schedule_action": r.get("schedule_action", "start"),
             "schedule_type": r.get("schedule_type", "daily"),
             "schedule_time": r.get("schedule_time", "09:00"),
@@ -9048,6 +9157,7 @@ class BatchManagerApp(TaskFeatureMixin):
             "log_output": r.get("log_output", False),
             "schedule_enabled": r.get("schedule_enabled", False),
             "launch_on_app_start": r.get("launch_on_app_start", False),
+            "restart_on_app_start": r.get("restart_on_app_start", False),
             "schedule_action": r.get("schedule_action", "start"),
             "schedule_type": r.get("schedule_type", "daily"),
             "schedule_time": r.get("schedule_time", "09:00"),
@@ -9106,6 +9216,7 @@ class BatchManagerApp(TaskFeatureMixin):
             "python_exe": interpreter if stype == "python" else "",
             "auto_restart": it.get("auto_restart", False),
             "launch_on_app_start": it.get("launch_on_app_start", False),
+            "restart_on_app_start": it.get("restart_on_app_start", False),
             "log_output": it.get("log_output", False),
             "schedule_enabled": it.get("schedule_enabled", False),
             "schedule_action": it.get("schedule_action", "start"),
@@ -9159,6 +9270,7 @@ class BatchManagerApp(TaskFeatureMixin):
         it["log_output"] = r.get("log_output", False)
         it["schedule_enabled"] = r.get("schedule_enabled", False)
         it["launch_on_app_start"] = r.get("launch_on_app_start", False)
+        it["restart_on_app_start"] = r.get("restart_on_app_start", False)
         it["schedule_action"] = r.get("schedule_action", "start")
         it["schedule_type"] = r.get("schedule_type", "daily")
         it["schedule_time"] = r.get("schedule_time", "09:00")
@@ -9774,6 +9886,7 @@ class BatchManagerApp(TaskFeatureMixin):
                 "python_exe": interpreter if stype == "python" else "",
                 "auto_restart": it.get("auto_restart", False),
                 "launch_on_app_start": it.get("launch_on_app_start", False),
+                "restart_on_app_start": it.get("restart_on_app_start", False),
                 "log_output": it.get("log_output", False),
                 "schedule_enabled": it.get("schedule_enabled", False),
                 "schedule_action": it.get("schedule_action", "start"),
@@ -10757,6 +10870,8 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _quit_app(self):
         """退出应用，不杀运行中的子进程（子进程独立运行）。"""
+        owned_tasks = self._running_tasks_for_restart(owned_only=True)
+        _atomic_write_json(self._startup_ownership_path(), owned_tasks)
         self._task_closing = True
         if hasattr(self, '_task_queue'):
             self._task_queue.pending.clear()
@@ -11007,19 +11122,31 @@ class BatchManagerApp(TaskFeatureMixin):
             for run in active.values()
         )
 
-    def _running_tasks_for_restart(self):
+    def _startup_ownership_path(self):
+        return Path(get_app_path()).resolve().with_suffix(".startup-tasks.json")
+
+    def _running_tasks_for_restart(self, *, owned_only=False):
         running = []
         if HAS_PSUTIL:
             for item in self.items:
                 if not item.get("pid"):
                     continue
                 try:
-                    created = psutil.Process(item["pid"]).create_time()
+                    process = psutil.Process(item["pid"])
+                    handle = item.get("_popen")
+                    restored = item.get("_startup_owned_process")
+                    owned = bool(
+                        (handle and handle.pid == process.pid and handle.poll() is None)
+                        or (restored is not None and restored == process and restored.is_running())
+                    )
+                    if owned_only and not owned:
+                        continue
+                    created = process.create_time()
                 except psutil.Error:
                     continue
                 running.append({
                     "id": item["id"], "path": item.get("path"), "pid": item["pid"],
-                    "created": created, "log": item.get("_log_path"),
+                    "created": created, "log": item.get("_log_path"), "owned": owned,
                 })
         return running
 
@@ -11056,12 +11183,18 @@ class BatchManagerApp(TaskFeatureMixin):
 
     def _restore_restarted_tasks(self):
         records = program_update.read_running_tasks(Path(get_app_path()))
-        if records is None:
-            return False
+        restarted = records is not None
+        if not restarted:
+            try:
+                records = json.loads(self._startup_ownership_path().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return False
         by_id = {item["id"]: item for item in self.items}
-        for record in records:
+        for record in records if isinstance(records, list) else ():
             if not HAS_PSUTIL:
                 break
+            if not isinstance(record, dict):
+                continue
             ident, pid, created = record.get("id"), record.get("pid"), record.get("created")
             if not isinstance(ident, int) or not isinstance(pid, int) or not isinstance(created, (int, float)):
                 continue
@@ -11074,10 +11207,13 @@ class BatchManagerApp(TaskFeatureMixin):
                     continue
             except psutil.Error:
                 continue
-            item.update(pid=process.pid, pid_set_at=created)
-            if record.get("log"):
-                item["_log_path"] = record["log"]
-        return True
+            if record.get("owned") is True:
+                item["_startup_owned_process"] = process
+            if restarted or item.get("restart_on_app_start"):
+                item.update(pid=process.pid, pid_set_at=created)
+                if record.get("log"):
+                    item["_log_path"] = record["log"]
+        return restarted
 
     def _on_restart_self(self):
         if getattr(self, "_restart_pending", False) or getattr(self, "_update_busy", False):
@@ -11156,6 +11292,7 @@ class BatchManagerApp(TaskFeatureMixin):
             self.root.after(400, self._minimize_main_window)
         self.root.after(0, self._start_ip_load_threads)  # 主循环启动后立即调度，再启动 IP 加载线程
         self._launch_on_start_retry_scheduled = False  # 用于第二轮自动启动重试（仅一次）
+        self.root.after(400, self._restart_on_start_items)
         if not restarted:
             self.root.after(400, self._do_launch_on_start_items)
         self.root.after(1500, self._do_launch_api_on_start)  # 自动启动 API（若已勾选）

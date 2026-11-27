@@ -30,7 +30,7 @@
 
 **运行边界：**定时、队列和保活依赖管理器进程持续运行，脚本进程仍在并不代表调度也在继续。OpenSSH 作为独立服务运行，维护端断开本身不会停止管理器管理的任务；直接通过 SSH 启动的命令，其存活取决于具体会话和启动方式。必须操作图形界面的程序仍可能需要交互桌面。进程存在不等于业务健康，当前能力不代表已具备应用健康检查或完整 SSH 命令审计。
 
-本地任务管理和 SSH/SFTP 接入不要求独立 API 脚本存在；HTTP API 和任务 MCP 服务需要 `WindowsBatchScriptManager_api_server.py` 及其 Python 依赖。[任务管理说明](docs/TASK_MANAGEMENT.md) · [远程接入说明](docs/WINDOWS_REMOTE_ACCESS.md)
+本地任务管理和 SSH/SFTP 接入不要求独立 API 脚本存在；首次启动 HTTP API 和任务 MCP 服务时，EXE 自动释放内置脚本，服务仍需要系统中的 Python 及其依赖。[任务管理说明](docs/TASK_MANAGEMENT.md) · [远程接入说明](docs/WINDOWS_REMOTE_ACCESS.md)
 
 ## 企业使用场景
 
@@ -53,6 +53,7 @@
 - 批量启停和重启脚本，查看端口、日志和执行历史。
 - 多套 WBSM 同时运行时，API 启停按当前安装目录识别服务进程。
 - API 未运行时也缓存状态检查。Windows OpenSSH 状态通过系统服务接口直接读取。
+- 在「编辑脚本 → 基本」勾选「启动本工具时自动重启」，打开 WBSM 时会重启可确认归属的本地任务，任务未运行时直接启动。
 - 在执行历史选中一条记录，点击 **复制 AI 排障信息**，复制该次执行的退出码、状态和已关联的日志尾部。常见凭据格式会被遮盖，分享前可先核对。
 - 从模板创建任务、按文件夹批量导入，选择 Python 虚拟环境、Conda 或 Node.js 版本。
 - 设置定时和并发上限，根据执行结果触发后续任务。
@@ -94,7 +95,7 @@ Get-Item -Force -LiteralPath "$env:SystemDrive\hiberfil.sys"
 
 ## 远程 API 与 MCP
 
-在服务器上把 `WindowsBatchScriptManager.exe` 和 `WindowsBatchScriptManager_api_server.py` 放在同一个目录。API 服务需要服务器上的 Python 和以下依赖。允许其他机器访问前，请设置专用密钥。
+在服务器上运行 `WindowsBatchScriptManager.exe`，点击「启动 API / MCP」时会自动把内置的 `WindowsBatchScriptManager_api_server.py` 释放到 EXE 所在目录。API 服务需要服务器上的 Python 和以下依赖。允许其他机器访问前，请设置专用密钥。
 
 安装依赖后，可在目标机主界面 **API / MCP** 区域点击 **启动 API / MCP**。运行状态会显示 MCP 地址，可点 **复制 MCP 地址**。找不到脚本或启动失败时，先检查文件位置和 **检测运行环境** 的结果。也可以从 PowerShell 手动启动。
 
